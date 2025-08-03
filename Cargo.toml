@@ -1,0 +1,22 @@
+[package]
+name = "AnyRef"
+version = "0.0.1"
+authors = ["sh1zen dev.sh1zen@outlook.it"]
+edition = "2024"
+description = "About Runtime-Typed Reference-Counted Smart Pointer"
+license = "Apache-2.0"
+repository = "https://github.com/sh1zen/castbox"
+documentation = "https://docs.rs/castbox"
+readme = "README.md"
+keywords = ["arc", "dyn-any", "thread-safe", "reference-counted", "atomic"]
+categories = ["data-structures", "concurrency", "memory-management"]
+exclude = [".gitignore", ".github/*"]
+homepage = "https://github.com/sh1zen/castbox"
+
+[lib]
+name = "castbox"
+path = "src/lib.rs"
+
+[[example]]
+name = "thread_safe"
+path = "examples/thread_safe.rs"
