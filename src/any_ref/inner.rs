@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::mutex::mutex::Mutex;
 use std::any::{Any, TypeId};
 use std::sync::atomic::AtomicUsize;
@@ -46,28 +48,24 @@ impl AnyRefInner {
         self.strong.load(Acquire) > 0
     }
 
-    #[inline(always)]
-    pub(crate) const fn get_ptr(&self) -> *mut dyn Any {
-        // We can just cast the pointer from `UnsafeCell<T>` to `T` because of
-        // #[repr(transparent)]. This exploits std's special status, there is
-        // no guarantee for user code that this will work in future versions of the compiler!
-        &*self.data as *const dyn Any as *mut dyn Any
-    }
-
     pub(crate) fn get_ref(&self) -> Option<&dyn Any> {
         if self.is_valid() {
-            unsafe { Some(&*self.get_ptr()) }
+            Some(&*self.data)
         } else {
             None
         }
     }
 
-    pub(crate) fn get_mut_ref(self: &Self) -> Option<&mut dyn Any> {
+    pub(crate) fn get_mut_ref(&mut self) -> Option<&mut dyn Any> {
         if self.is_valid() {
-            self.lock.lock();
-            unsafe { Some(&mut *self.get_ptr()) }
+            Some(&mut *self.data)
         } else {
             None
         }
+    }
+
+    #[inline]
+    pub(crate) fn is_locked(&self) -> bool {
+        self.lock.is_locked()
     }
 }

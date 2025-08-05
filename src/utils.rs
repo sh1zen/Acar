@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::alloc::Layout;
 
 /// Calculate layout for `T` using the inner value's layout

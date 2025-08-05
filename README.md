@@ -31,10 +31,10 @@ assert_eq!(a.as_ref::<i32>(), &42);
 ### Runtime Downcasting
 
 ```rust
-use castbox::Downcast;
+use castbox::{AnyRef, Downcast};
 
 let a = AnyRef::new("hello".to_string());
-if let Some(s) = a.try_downcast::<String>() {
+if let Some(s) = a.try_downcast_ref::<String>() {
     assert_eq!(s, "hello");
 }
 ```
@@ -42,6 +42,8 @@ if let Some(s) = a.try_downcast::<String>() {
 ### Cloning and Reference Counting
 
 ```rust
+use castbox::AnyRef;
+
 let a = AnyRef::new(vec![1, 2, 3]);
 let b = a.clone();
 
@@ -51,6 +53,8 @@ assert_eq!(AnyRef::strong_count(&a), 2);
 ### Weak Reference
 
 ```rust
+use castbox::AnyRef;
+
 let a = AnyRef::new("temporary".to_string());
 let w = a.downgrade();
 
@@ -62,6 +66,10 @@ assert!(w.upgrade().is_none());
 ### Thread-Safe Mode
 
 ```rust
+use std::sync::Barrier;
+use std::thread;
+use castbox::{AnyRef, Downcast};
+
 let x = AnyRef::new(123i32);
 let mut handles = vec![];
 let barrier = AnyRef::new(Barrier::new(10));
@@ -70,8 +78,8 @@ for i in 0..10 {
     let x_clone = x.clone();
     let barrier_clone = barrier.clone();
     handles.push(thread::spawn(move || {
-        barrier_clone.downcast::<Barrier>().wait();
-        let val = x_clone.downcast::<i32>();
+        barrier_clone.downcast_ref::<Barrier>().wait();
+        let val = x_clone.downcast_ref::<i32>();
         assert_eq!(*val, 123);
     }));
     assert_eq!(AnyRef::strong_count(&x), i + 2);
@@ -94,7 +102,7 @@ Open your Cargo.toml and add:
 
 ```toml
 [dependencies]
-castbox = "1.0.0" #or the latest version available 
+castbox = "0.0.1" #or the latest version available 
 ```
 ---
 

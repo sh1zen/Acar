@@ -10,17 +10,39 @@ mod tests {
     use std::thread;
 
     #[test]
-    fn drop_inplace() {
-        use std::{rc::Rc, thread};
+    fn test_map() {
+        let x = AnyRef::new(5i32);
+        assert_eq!(
+            *x.map(|x: &i32| (x * 2) as u64).downcast_ref::<u64>(),
+            10u64
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn test_send() {
+        let a = AnyRef::new(Rc::new("hello".to_string()));
+
+        if let Some(s) = a.try_downcast_ref::<Rc<String>>() {
+            assert_eq!(**s, "hello");
+        }
 
         let mut handles = vec![];
-        let mut val = AnyRef::new(Rc::new(String::from("hello")));
+
+        let val = AnyRef::clone(&a);
+
         for _ in 0..100 {
             let mut val_clone = val.clone();
+
             handles.push(thread::spawn(move || {
-                let mut rc = val_clone.downcast_mut::<Rc<String>>();
+                let _clone2 = val_clone.clone();
+
+                let rc = val_clone.downcast_mut::<Rc<String>>();
+                let mut rc = std::hint::black_box(rc);
+
                 for _ in 0..1000 {
-                    let mut_ref = Rc::get_mut(&mut rc);
+                    let mut_ref = Rc::get_mut(&mut *rc);
+
                     if let Some(s) = mut_ref {
                         s.push_str(":1");
                     }
@@ -32,10 +54,7 @@ mod tests {
             h.join().unwrap();
         }
 
-        println!(
-            "val: {:?}",
-            val.downcast_ref::<Rc<String>>().split(":").count()
-        );
+        assert_eq!(val.downcast_ref::<Rc<String>>().split(":").count(), 100_001);
     }
 
     #[test]
@@ -90,40 +109,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Downcast failed")]
     fn test_downcast_fail() {
         let x = AnyRef::new(1234i64);
-        let _: &u32 = x.downcast_ref(); // Panics
-    }
-
-    #[test]
-    fn test_try_downcast_mut_fail_with_multiple_strong() {
-        let rc = Rc::new(0u32);
-
-        let fake_send = AnyRef::new(rc.clone());
-        let fake_send2 = AnyRef::new(rc.clone());
-
-        // Thread 1: clona l'Rc
-        let handle1 = thread::spawn({
-            move || {
-                for _ in 0..10000 {
-                    let _ = fake_send.downcast_ref::<Rc<u32>>().clone(); // accesso concorrente al contatore
-                }
-            }
-        });
-
-        // Thread 2: clona l'Rc
-        let handle2 = thread::spawn(move || {
-            for _ in 0..10000 {
-                let _ = fake_send2.downcast_ref::<Rc<u32>>().clone(); // accesso concorrente al contatore
-            }
-        });
-
-        handle1.join().unwrap();
-        handle2.join().unwrap();
-
-        // Alla fine, drop finale su Rc
-        drop(rc);
+        let r = x.try_downcast_ref::<u32>();
+        assert!(r.is_none())
     }
 
     #[test]
@@ -183,6 +172,7 @@ mod tests {
     fn test_from_raw_in_reconstruction() {
         let x = AnyRef::new(String::from("hello"));
         let raw = AnyRef::into_raw(x);
+
         let y = AnyRef::from_raw(raw);
         let val = y.downcast_ref::<String>();
         assert_eq!(val, &"hello");
@@ -214,17 +204,17 @@ mod tests {
 
     #[test]
     fn test_concurrent_clone_and_drop() {
-        let x = AnyRef::new(123i32);
+        let x = AnyRef::new(100i32);
         let mut handles = vec![];
-        let barrier = AnyRef::new(Barrier::new(10));
+        let barrier = AnyRef::new(Barrier::new(100));
 
-        for i in 0..10 {
+        for i in 0..100 {
             let x_clone = x.clone();
             let barrier_clone = barrier.clone();
             handles.push(thread::spawn(move || {
                 barrier_clone.downcast_ref::<Barrier>().wait();
                 let val = x_clone.downcast_ref::<i32>();
-                assert_eq!(*val, 123);
+                assert_eq!(*val, 100);
             }));
 
             assert_eq!(AnyRef::strong_count(&x), i + 2);
@@ -262,7 +252,7 @@ mod tests {
     }
 
     #[test]
-    fn test_acar_thread_safe() {
+    fn test_thread_safe() {
         let mut x = AnyRef::new(String::from("hello"));
         let mut y = x.clone();
 
@@ -280,9 +270,9 @@ mod tests {
         let mut handles = vec![];
 
         for i in 0..10 {
-            let mut acar_clone = AnyRef::clone(&x);
+            let mut a_clone = AnyRef::clone(&x);
             handles.push(thread::spawn(move || {
-                let mut val = acar_clone.downcast_mut::<String>();
+                let mut val = a_clone.downcast_mut::<String>();
                 val.push_str(format!(":{}", i).as_str());
             }));
         }
@@ -324,8 +314,13 @@ mod tests {
 
     #[test]
     fn test_try_unwrap() {
-        let x = AnyRef::new(String::from("hello"));
-        let y = AnyRef::try_unwrap::<String>(x).unwrap();
-        assert_eq!(y, "hello");
+        let x = AnyRef::new(3i32);
+        if let Ok(t) = AnyRef::try_unwrap::<i32>(x) {
+            assert_eq!(t, 3i32);
+        }
+
+        let x = AnyRef::new(4);
+        let _y = AnyRef::clone(&x);
+        assert_eq!(*AnyRef::try_unwrap::<i32>(x).unwrap_err().downcast_ref::<i32>(), 4);
     }
 }

@@ -10,7 +10,7 @@ pub(crate) trait PtrInterface
 where
     Self: Sized,
 {
-    fn get_ptr(&self) -> NonNull<AnyRefInner>;
+    fn get_non_null_inner(&self) -> NonNull<AnyRefInner>;
 
     unsafe fn from_inner_in(ptr: NonNull<AnyRefInner>) -> Self;
 
@@ -21,11 +21,11 @@ where
 
     fn into_wrapped(self: Self) -> NonNull<AnyRefInner> {
         let this = ManuallyDrop::new(self);
-        this.get_ptr()
+        this.get_non_null_inner()
     }
 
     unsafe fn read_any(&self) -> Box<dyn Any> {
-        unsafe { ptr::read(&self.get_ptr().as_ref().data) }
+        unsafe { ptr::read(&self.get_non_null_inner().as_ref().data) }
     }
 
     unsafe fn read_data<T>(&self) -> T {
@@ -33,11 +33,11 @@ where
     }
 
     fn as_ptr(&self) -> *const dyn Any {
-        let ptr: *mut AnyRefInner = NonNull::as_ptr(self.get_ptr());
+        let ptr: *mut AnyRefInner = NonNull::as_ptr(self.get_non_null_inner());
 
         if is_dangling(ptr) {
             // If the pointer is dangling, we return the sentinel directly. This cannot be
-            // a valid payload address, as the payload is at least as aligned as ArcInner (usize).
+            // a valid payload address, as the payload is at least as aligned as AnyRefInner (usize).
             ptr as *const dyn Any
         } else {
             // SAFETY: if is_dangling returns false, then the pointer is dereferenceable.
@@ -64,7 +64,7 @@ where
             let obj = ptr as *const u8;
             let data_offset = offset_of!(AnyRefInner, data);
 
-            // SAFETY: we assume the dyn Any points to AcarInner.data
+            // SAFETY: we assume the dyn Any points to AnyRefInner.data
             unsafe { obj.offset(-(data_offset as isize)) as *mut AnyRefInner }
         };
 

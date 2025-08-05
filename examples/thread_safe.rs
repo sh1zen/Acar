@@ -5,9 +5,9 @@ use castbox::{AnyRef, Downcast};
 fn main() {
     let x = AnyRef::new(123i32);
     let mut handles = vec![];
-    let barrier = AnyRef::new(Barrier::new(10));
+    let barrier = AnyRef::new(Barrier::new(1000));
 
-    for i in 0..10 {
+    for i in 0..1000 {
         let x_clone = x.clone();
         let barrier_clone = barrier.clone();
         handles.push(thread::spawn(move || {

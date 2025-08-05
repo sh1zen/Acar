@@ -1,18 +1,22 @@
-use crate::any_ref::AnyRef;
+use crate::Mutex;
 use std::ops::{Deref, DerefMut};
 
-/// used asa wrapper for a pointer to a reference
+/// used as wrapper for a pointer to a reference
 #[must_use = "if unused the Mutex will immediately unlock"]
 #[clippy::has_significant_drop]
 pub struct WatchGuard<'a, T: ?Sized + 'a> {
     data: &'a mut T,
-    owner: &'a AnyRef,
+    lock: Mutex,
 }
 
 impl<'mutex, T: ?Sized> WatchGuard<'mutex, T> {
     ///create a new WatchGuard from a &mut T and AnyRef
-    pub fn new(owner: &'mutex AnyRef, ptr: &'mutex mut T) -> WatchGuard<'mutex, T> {
-        Self { data: ptr, owner }
+    pub fn new(ptr: &'mutex mut T, lock: Mutex) -> WatchGuard<'mutex, T> {
+        Self { data: ptr, lock }
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.lock.is_locked()
     }
 }
 
@@ -37,6 +41,6 @@ impl<T: ?Sized> DerefMut for WatchGuard<'_, T> {
 impl<T: ?Sized> Drop for WatchGuard<'_, T> {
     #[inline]
     fn drop(&mut self) {
-        self.owner.inner().lock.unlock();
+        self.lock.unlock();
     }
 }

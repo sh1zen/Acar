@@ -1,10 +1,10 @@
-use crate::WatchGuard;
 use crate::any_ref::downcast::Downcast;
 use crate::any_ref::inner::{AnyRefInner, MAX_REFCOUNT};
 use crate::any_ref::ptr_interface::PtrInterface;
 use crate::any_ref::wrapper::AnyRef;
 use crate::utils::is_dangling;
-use std::alloc::{Layout, dealloc};
+use crate::WatchGuard;
+use std::alloc::{dealloc, Layout};
 use std::any::{Any, TypeId};
 use std::num::NonZeroUsize;
 use std::process::abort;
@@ -181,7 +181,7 @@ impl Downcast for WeakAnyRef {
 }
 
 impl PtrInterface for WeakAnyRef {
-    fn get_ptr(&self) -> NonNull<AnyRefInner> {
+    fn get_non_null_inner(&self) -> NonNull<AnyRefInner> {
         self.ptr
     }
 
@@ -200,9 +200,11 @@ impl Drop for WeakAnyRef {
         if inner.weak.fetch_sub(1, Release) == 1 {
             atomic::fence(Acquire);
 
+            let layout = Layout::new::<AnyRefInner>();
+            let ptr = self.ptr.as_ptr() as *mut u8;
+
             unsafe {
-                let layout = Layout::new::<AnyRefInner>();
-                let ptr = self.ptr.as_ptr() as *mut u8;
+                //drop(Box::from_raw(self.ptr.as_ptr()));
                 dealloc(ptr, layout);
             }
         }

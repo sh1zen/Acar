@@ -61,7 +61,7 @@ impl AnyRef {
     /// use crate::castbox::AnyRef;
     /// let a = AnyRef::new(123i32);
     /// let value = AnyRef::try_unwrap::<i32>(a).unwrap();
-    /// assert_eq!(value, 123);
+    /// assert_eq!(value, 123i32);
     /// ```
     pub fn try_unwrap<T>(this: Self) -> Result<T, Self> {
         if this
@@ -76,11 +76,13 @@ impl AnyRef {
         atomic::fence(Acquire);
 
         let this = ManuallyDrop::new(this);
-
         let elem: T = unsafe { this.read_data::<T>() };
 
         // Make a weak pointer to clean up the implicit strong-weak reference
         let _weak = WeakAnyRef { ptr: this.ptr };
+
+        unsafe { ptr::drop_in_place(&mut (*this.ptr.as_ptr()).data) }
+        unsafe { ptr::drop_in_place(&mut (*this.ptr.as_ptr()).lock) }
 
         Ok(elem)
     }
@@ -88,15 +90,30 @@ impl AnyRef {
     pub(crate) fn inner(&self) -> &AnyRefInner {
         // This unsafety is ok because while this AnyRef is alive we're guaranteed
         // that the inner pointer is valid. Furthermore, we know that the
-        // `ArcInner` structure itself is `Sync` because the inner data is
+        // `AnyRefInner` structure itself is `Sync` because the inner data is
         // `Sync` as well, so we're ok loaning out an immutable pointer to these
         // contents.
-        unsafe { self.ptr.as_ref() }
+        let ptr: *mut AnyRefInner = NonNull::as_ptr(self.get_non_null_inner());
+        unsafe { &*ptr }
     }
 
-    #[allow(dead_code)]
     fn inner_mut(&mut self) -> &mut AnyRefInner {
-        unsafe { self.ptr.as_mut() }
+        let ptr: *mut AnyRefInner = NonNull::as_ptr(self.get_non_null_inner());
+        unsafe { &mut *ptr }
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.inner().is_locked()
+    }
+
+    #[inline]
+    pub fn map<T, U: 'static, F>(self, func: F) -> AnyRef
+    where
+        T: Any,
+        F: FnOnce(&T) -> U,
+    {
+        let ptr = self.downcast_ref::<T>();
+        AnyRef::new(func(ptr))
     }
 
     /// Returns a raw pointer to the contained type, if possible.
@@ -108,9 +125,12 @@ impl AnyRef {
     /// let ptr = a.as_cast_ptr::<i32>();
     /// assert_eq!(unsafe { *ptr }, 50);
     /// ```
-    pub fn as_cast_ptr<T: Any>(self: &Self) -> *const T {
+    pub fn as_cast_ptr<T: Any>(&self) -> *const T {
         if self.inner().type_id != TypeId::of::<T>() {
-            panic!("AnyRef: wrong cast in as_ref::<{}>()",  std::any::type_name::<T>());
+            panic!(
+                "AnyRef: wrong cast in as_ref::<{}>()",
+                std::any::type_name::<T>()
+            );
         }
         let ptr = self.as_ptr();
         ptr as *const T
@@ -125,14 +145,12 @@ impl AnyRef {
     /// let any = a.as_ref_any();
     /// assert_eq!(any.downcast_ref::<String>().unwrap(), "hello");
     /// ```
-    pub fn as_ref_any(self: &Self) -> &dyn Any {
+    pub fn as_ref_any(&self) -> &dyn Any {
         let ptr = self.as_ptr();
         unsafe { &*(ptr) }
     }
 
     /// Returns a reference to the inner value of type `T`.
-    ///
-    /// # Panics
     /// Panics if the type does not match `T`.
     ///
     /// # Example
@@ -142,9 +160,25 @@ impl AnyRef {
     /// let f = a.as_ref::<f32>();
     /// assert_eq!(*f, 3.14);
     /// ```
-    pub fn as_ref<T: Any>(self: &Self) -> &T {
+    pub fn as_ref<T: Any>(&self) -> &T {
         let ptr = self.as_cast_ptr::<T>();
         unsafe { &*(ptr) }
+    }
+
+    /// Returns a mutable reference to the inner value of type `T`.
+    /// Panics if the type does not match `T`.
+    ///
+    /// # Example
+    /// ```
+    /// use crate::castbox::AnyRef;
+    /// let mut a = AnyRef::new(3i32);
+    /// let mut f = a.as_mut::<i32>();
+    /// *f += 3i32;
+    /// assert_eq!(*f, 6i32);
+    /// ```
+    pub fn as_mut<T: Any>(&mut self) -> &mut T {
+        let ptr = self.as_cast_ptr::<T>();
+        unsafe { &mut *(ptr as *mut T) }
     }
 
     /// Returns `true` if the `AnyRef` is the only strong reference to the value.
@@ -211,7 +245,7 @@ impl AnyRef {
             assert!(cur <= MAX_REFCOUNT, "INTERNAL OVERFLOW ERROR");
 
             // NOTE: this code currently ignores the possibility of overflow
-            // into usize::MAX; in general both Rc and Arc need to be adjusted
+            // into usize::MAX; in general both Rc and AnyRef need to be adjusted
             // to deal with overflow.
 
             // Unlike with Clone(), we need this to be an Acquire read to
@@ -265,13 +299,23 @@ impl AnyRef {
 
     #[inline]
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
-        ptr::addr_eq(this.get_ptr().as_ptr(), other.get_ptr().as_ptr())
+        ptr::addr_eq(
+            this.get_non_null_inner().as_ptr(),
+            other.get_non_null_inner().as_ptr(),
+        )
     }
 
     pub fn into_raw(self) -> *const Box<dyn Any> {
+        // prevent auto drop
         let this = ManuallyDrop::new(self);
-        let ptr = unsafe { &this.get_ptr().as_mut().data };
-        ptr
+
+        // Getting pointer to AnyRefInner
+        let inner_ptr = this.ptr.as_ptr();
+
+        // Make sure Miri realizes that we transition from a noalias pointer to a raw pointer here.
+        let data_ptr = unsafe { &raw const (*inner_ptr).data };
+
+        data_ptr
     }
 
     pub fn from_raw<T: ?Sized>(ptr: *const T) -> Self {
@@ -281,7 +325,7 @@ impl AnyRef {
 
 impl PtrInterface for AnyRef {
     #[inline]
-    fn get_ptr(&self) -> NonNull<AnyRefInner> {
+    fn get_non_null_inner(&self) -> NonNull<AnyRefInner> {
         self.ptr
     }
 
@@ -296,25 +340,25 @@ impl PtrInterface for AnyRef {
 
 impl Downcast for AnyRef {
     fn try_downcast_ref<U: Any>(&self) -> Option<&U> {
-        if self.inner().type_id == TypeId::of::<U>() {
-            match self.inner().get_ref() {
-                Some(ptr) => ptr.downcast_ref::<U>(),
-                None => None,
-            }
+        let inner_ref = self.inner();
+
+        if inner_ref.type_id == TypeId::of::<U>() {
+            inner_ref.get_ref()?.downcast_ref::<U>()
         } else {
             None
         }
     }
 
     fn try_downcast_mut<U: Any>(&mut self) -> Option<WatchGuard<U>> {
-        if self.inner().type_id == TypeId::of::<U>() {
-            match self.inner().get_mut_ref() {
-                Some(ptr) => {
-                    let ptr = ptr.downcast_mut::<U>()?;
-                    Some(WatchGuard::new(self, ptr))
-                }
-                None => None,
-            }
+        let inner_ref = self.inner();
+
+        if inner_ref.type_id == TypeId::of::<U>() {
+            let lock = inner_ref.lock.clone();
+            lock.lock();
+
+            let ptr = unsafe { &mut *(self.as_ptr() as *mut dyn Any) };
+            let ptr = ptr.downcast_mut::<U>()?;
+            Some(WatchGuard::new(ptr, lock))
         } else {
             None
         }
@@ -322,7 +366,7 @@ impl Downcast for AnyRef {
 }
 
 impl Clone for AnyRef {
-    /// Makes a clone of the `Arc` pointer.
+    /// Makes a clone of the `AnyRef` pointer.
     ///
     /// This creates another pointer to the same allocation, increasing the
     /// strong reference count.
@@ -331,9 +375,7 @@ impl Clone for AnyRef {
         // Using a relaxed ordering is alright here, as knowledge of the
         // original reference prevents other threads from erroneously deleting
         // the object.
-        let old_size = self.inner().strong.fetch_add(1, Relaxed);
-
-        if old_size > MAX_REFCOUNT {
+        if self.inner().strong.fetch_add(1, Relaxed) > MAX_REFCOUNT {
             abort();
         }
 
@@ -399,8 +441,8 @@ impl AnyRef {
     /// let a = AnyRef::fill(a, 123);
     /// assert_eq!(a.as_ref::<i32>(), &123);
     /// ```
-    pub fn fill<T: 'static>(this: Self, value: T) -> Self {
-        let ref_inner = unsafe { &mut *this.ptr.as_ptr() };
+    pub fn fill<T: 'static>(mut this: Self, value: T) -> Self {
+        let ref_inner = &mut *this.inner_mut();
         ref_inner.data = Box::new(value);
         ref_inner.type_id = TypeId::of::<T>();
         this
@@ -409,8 +451,6 @@ impl AnyRef {
 
 impl Drop for AnyRef {
     fn drop(&mut self) {
-        self.inner().lock.unlock();
-
         // Because `fetch_sub` is already atomic, we do not need to synchronize
         // with other threads unless we are going to delete the object. This
         // same logic applies to the below `fetch_sub` to the `weak` count.
@@ -418,11 +458,24 @@ impl Drop for AnyRef {
             return;
         }
 
-        atomic::fence(Acquire);
+        atomic::fence(Release);
 
         let _weak = WeakAnyRef { ptr: self.ptr };
 
+        unsafe { ptr::drop_in_place(&mut (*self.ptr.as_ptr()).lock) }
+
         unsafe { ptr::drop_in_place(&mut (*self.ptr.as_ptr()).data) }
+    }
+}
+
+impl<T: 'static> From<*mut T> for AnyRef {
+    /// Converts a `*const T` to a `AnyRef`.
+    ///
+    /// This conversion is safe and infallible since references cannot be null.
+    #[inline]
+    fn from(ptr: *mut T) -> Self {
+        let ptr = unsafe { ptr::read(ptr) };
+        Self::new(ptr)
     }
 }
 

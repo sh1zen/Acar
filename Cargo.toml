@@ -1,6 +1,6 @@
 [package]
-name = "AnyRef"
-version = "0.0.1"
+name = "castbox"
+version = "0.0.2"
 authors = ["sh1zen dev.sh1zen@outlook.it"]
 edition = "2024"
 description = "About Runtime-Typed Reference-Counted Smart Pointer"
