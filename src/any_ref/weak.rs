@@ -1,10 +1,10 @@
+use crate::WatchGuard;
 use crate::any_ref::downcast::Downcast;
 use crate::any_ref::inner::{AnyRefInner, MAX_REFCOUNT};
 use crate::any_ref::ptr_interface::PtrInterface;
 use crate::any_ref::wrapper::AnyRef;
 use crate::utils::is_dangling;
-use crate::WatchGuard;
-use std::alloc::{dealloc, Layout};
+use std::alloc::{Layout, dealloc};
 use std::any::{Any, TypeId};
 use std::num::NonZeroUsize;
 use std::process::abort;
@@ -19,7 +19,6 @@ pub struct WeakAnyRef {
 }
 
 unsafe impl Send for WeakAnyRef {}
-
 unsafe impl Sync for WeakAnyRef {}
 
 impl WeakAnyRef {
@@ -175,7 +174,7 @@ impl Downcast for WeakAnyRef {
         }
     }
 
-    fn try_downcast_mut<U: Any>(&mut self) -> Option<WatchGuard<U>> {
+    fn try_downcast_mut<'a, U: Any>(&'a mut self) -> Option<WatchGuard<'a, U>> {
         None
     }
 }

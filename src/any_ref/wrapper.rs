@@ -1,9 +1,9 @@
-use crate::WatchGuard;
 use crate::any_ref::downcast::Downcast;
 use crate::any_ref::inner::{AnyRefInner, MAX_REFCOUNT};
 use crate::any_ref::ptr_interface::PtrInterface;
 use crate::any_ref::weak::WeakAnyRef;
 use crate::utils::is_dangling;
+use crate::WatchGuard;
 use std::any::{Any, TypeId};
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
@@ -36,22 +36,6 @@ impl AnyRef {
         T: Any + Sized,
     {
         unsafe { Self::from_inner(Box::leak(Box::new(AnyRefInner::new(value))).into()) }
-    }
-
-    /// Creates a new `AnyRef` from a boxed value.
-    ///
-    /// # Example
-    /// ```
-    /// use crate::castbox::AnyRef;
-    /// let boxed = Box::new("hello");
-    /// let a = AnyRef::from_box(boxed);
-    /// assert_eq!(a.as_ref::<&str>(), &"hello");
-    /// ```
-    pub fn from_box<T>(src: Box<T>) -> Self
-    where
-        T: Any + Sized,
-    {
-        unsafe { Self::from_inner(Box::leak(Box::new(AnyRefInner::from_box(src))).into()) }
     }
 
     /// Attempts to extract the inner value if there is exactly one strong reference.
@@ -103,7 +87,7 @@ impl AnyRef {
     }
 
     pub fn is_locked(&self) -> bool {
-        self.inner().is_locked()
+        self.inner().lock.is_locked()
     }
 
     #[inline]
@@ -349,7 +333,7 @@ impl Downcast for AnyRef {
         }
     }
 
-    fn try_downcast_mut<U: Any>(&mut self) -> Option<WatchGuard<U>> {
+    fn try_downcast_mut<'a, U: Any>(&'a mut self) -> Option<WatchGuard<'a, U>> {
         let inner_ref = self.inner();
 
         if inner_ref.type_id == TypeId::of::<U>() {
@@ -387,11 +371,7 @@ impl Default for AnyRef {
     fn default() -> AnyRef {
         unsafe {
             Self::from_inner(
-                Box::leak(Box::write(
-                    Box::new_uninit(),
-                    AnyRefInner::from_box(Box::new(())),
-                ))
-                .into(),
+                Box::leak(Box::write(Box::new_uninit(), AnyRefInner::default())).into(),
             )
         }
     }
@@ -429,7 +409,7 @@ impl AnyRef {
     /// assert_eq!(a.as_ref::<String>(), "");
     /// ```
     pub fn default_with<T: 'static + Default>() -> Self {
-        Self::from_box(Box::new(T::default()))
+        Self::from(Box::new(T::default()))
     }
 
     /// Replaces the inner value with a new value of type `T`.
@@ -469,13 +449,62 @@ impl Drop for AnyRef {
 }
 
 impl<T: 'static> From<*mut T> for AnyRef {
-    /// Converts a `*const T` to a `AnyRef`.
+    /// Creates a new `AnyRef` taking posses over the pointed value `*mut T`.
     ///
-    /// This conversion is safe and infallible since references cannot be null.
+    /// # Safety
+    /// - `ptr` must be valid and pointing to a dynamically allocated instance of T
+    ///   (ex. `Box::into_raw`).
+    /// - After AnyRef will own `ptr` and no other reference to ptr should be used.
+    ///
+    /// # Example
+    /// ```
+    /// use castbox::{create_raw_pointer, dealloc_layout, dealloc_raw_pointer};
+    /// use crate::castbox::{AnyRef, Downcast};
+    /// let raw = create_raw_pointer(String::from("hello"));
+    /// let mut a = AnyRef::from(raw);
+    /// a.downcast_mut::<String>().push_str(":1");
+    /// dealloc_layout(raw);
+    /// assert_eq!(a.as_ref::<String>(), "hello:1");
+    /// ```
     #[inline]
     fn from(ptr: *mut T) -> Self {
-        let ptr = unsafe { ptr::read(ptr) };
-        Self::new(ptr)
+        let value = unsafe { ptr::read(ptr) };
+        AnyRef::new(value)
+    }
+}
+
+impl From<&str> for AnyRef {
+    /// Creates a new `AnyRef` from a `*const T`.
+    ///
+    /// # Example
+    /// ```
+    /// use crate::castbox::AnyRef;
+    /// let a = AnyRef::from("hello");
+    /// assert_eq!(a.as_ref::<String>(), &"hello");
+    /// ```
+    #[inline]
+    fn from(s: &str) -> Self {
+        // copy data to own them
+        AnyRef::new(s.to_string())
+    }
+}
+
+impl<T: 'static> From<Box<T>> for AnyRef {
+    /// Creates a new `AnyRef` from a `Box<T>`.
+    ///
+    /// # Example
+    /// ```
+    /// use crate::castbox::AnyRef;
+    /// let boxed = Box::new("hello");
+    /// let a = AnyRef::from(boxed);
+    /// assert_eq!(a.as_ref::<&str>(), &"hello");
+    /// ```
+    #[inline]
+    fn from(b: Box<T>) -> Self
+    where
+        T: Sized,
+    {
+        unsafe { Self::from_inner(Box::leak(Box::new(AnyRefInner::from_box(b))).into()) }
     }
 }
 

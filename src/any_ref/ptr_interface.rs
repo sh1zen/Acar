@@ -1,8 +1,8 @@
 #![allow(dead_code)]
-use crate::utils::is_dangling;
 use crate::any_ref::inner::AnyRefInner;
+use crate::utils::is_dangling;
 use std::any::Any;
-use std::mem::{offset_of, ManuallyDrop};
+use std::mem::offset_of;
 use std::ptr;
 use std::ptr::NonNull;
 
@@ -17,15 +17,6 @@ where
     #[inline]
     unsafe fn from_ptr_in(ptr: *mut AnyRefInner) -> Self {
         unsafe { Self::from_inner_in(NonNull::new_unchecked(ptr)) }
-    }
-
-    fn into_wrapped(self: Self) -> NonNull<AnyRefInner> {
-        let this = ManuallyDrop::new(self);
-        this.get_non_null_inner()
-    }
-
-    unsafe fn read_any(&self) -> Box<dyn Any> {
-        unsafe { ptr::read(&self.get_non_null_inner().as_ref().data) }
     }
 
     unsafe fn read_data<T>(&self) -> T {

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::mutex::mutex::Mutex;
 use std::any::{Any, TypeId};
 use std::sync::atomic::AtomicUsize;
@@ -56,6 +54,7 @@ impl AnyRefInner {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn get_mut_ref(&mut self) -> Option<&mut dyn Any> {
         if self.is_valid() {
             Some(&mut *self.data)
@@ -63,9 +62,10 @@ impl AnyRefInner {
             None
         }
     }
+}
 
-    #[inline]
-    pub(crate) fn is_locked(&self) -> bool {
-        self.lock.is_locked()
+impl Default for AnyRefInner {
+    fn default() -> Self {
+        Self::from_box(Box::new(()))
     }
 }
