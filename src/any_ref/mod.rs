@@ -2,8 +2,8 @@ mod downcast;
 mod inner;
 mod ptr_interface;
 mod weak;
-mod wrapper;
+mod strong;
 
 pub use downcast::Downcast;
 pub use weak::WeakAnyRef;
-pub use wrapper::AnyRef;
+pub use strong::AnyRef;

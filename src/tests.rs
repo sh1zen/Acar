@@ -1,13 +1,15 @@
 #[cfg(test)]
 
 mod tests {
-    use crate::{AnyRef, Downcast, WeakAnyRef};
+    use crate::{AnyRef, AtomicVec, Downcast, WeakAnyRef};
     use std::any::TypeId;
     use std::rc::Rc;
     use std::sync::Barrier;
     use std::sync::atomic::AtomicU8;
     use std::sync::atomic::Ordering::{Acquire, Relaxed};
     use std::thread;
+    use std::thread::sleep;
+    use std::time::Duration;
 
     #[test]
     fn test_map() {
@@ -19,8 +21,98 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)]
+    fn test_send_sync() {
+        struct UnsafeSendRc<T>(Rc<T>);
+        impl<T> UnsafeSendRc<T> {
+            fn new(val: T) -> UnsafeSendRc<T> {
+                UnsafeSendRc(Rc::new(val))
+            }
+        }
+        impl<T> Clone for UnsafeSendRc<T> {
+            fn clone(&self) -> Self {
+                UnsafeSendRc(self.0.clone())
+            }
+        }
+
+        let rc = UnsafeSendRc::new(Vec::from([1i32, 2i32, 3i32]));
+        let mut handles = vec![];
+        let barrier = AnyRef::new(Barrier::new(1_000));
+
+        let a_rc = AnyRef::new(rc.clone());
+
+        for _i in 0..100 {
+            let mut x_clone = a_rc.clone();
+            let barrier_clone = barrier.clone();
+            handles.push(thread::spawn(move || {
+                barrier_clone.downcast_ref::<Barrier>().wait();
+                for _ in 0..100 {
+                    let xx_clone = x_clone.downcast_mut::<UnsafeSendRc<Vec<i32>>>();
+                    // add dirty
+                    //let _clone = std::hint::black_box(&xx_clone);
+
+                    // direct retrieve rc data ptr
+                    let _ptr = &raw const (*xx_clone.0) as *mut Vec<i32>;
+                 //   let ptr = unsafe { &mut *ptr };
+                 //   ptr.push(i);
+                }
+            }));
+        }
+
+        for _ in 0..100 {
+            let a_rc_clone = a_rc.clone();
+            handles.push(thread::spawn(move || {
+                for _ in 0..100 {
+                    let _clone = a_rc_clone.downcast_ref::<UnsafeSendRc<Vec<i32>>>();
+                    std::hint::black_box(&_clone);
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_atomic_vec() {
+        let vec = AtomicVec::new();
+        let vec_c = vec.clone();
+
+        vec_c.push(10);
+        vec.push(20);
+        vec_c.push(30);
+        assert_eq!(vec.pop().unwrap(), 10);
+        assert_eq!(vec.pop().unwrap(), 20);
+        assert_eq!(vec.pop().unwrap(), 30);
+
+        let mut handles = vec![];
+
+        for _ in 0..100 {
+            let vec_c = vec.clone();
+            handles.push(thread::spawn(move || {
+                vec_c.push(10);
+            }));
+
+            let vec_c = vec.clone();
+            handles.push(thread::spawn(move || {
+                vec_c.pop();
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        for _ in 0..100 {
+            vec_c.pop();
+        }
+
+        assert!(vec.pop().is_none());
+    }
+
+    #[test]
     fn test_send() {
+        // suing std::(arc, mutex) takes 29s
         let a = AnyRef::new(Rc::new("hello".to_string()));
 
         if let Some(s) = a.try_downcast_ref::<Rc<String>>() {
@@ -35,17 +127,12 @@ mod tests {
             let mut val_clone = val.clone();
 
             handles.push(thread::spawn(move || {
-                let _clone2 = val_clone.clone();
-
                 let rc = val_clone.downcast_mut::<Rc<String>>();
+                // add some dirty
                 let mut rc = std::hint::black_box(rc);
-
-                for _ in 0..1000 {
-                    let mut_ref = Rc::get_mut(&mut *rc);
-
-                    if let Some(s) = mut_ref {
-                        s.push_str(":1");
-                    }
+                for _ in 0..100 {
+                    let ptr = Rc::get_mut(&mut rc).unwrap();
+                    ptr.push_str(":1")
                 }
             }));
         }
@@ -54,7 +141,7 @@ mod tests {
             h.join().unwrap();
         }
 
-        assert_eq!(val.downcast_ref::<Rc<String>>().split(":").count(), 100_001);
+        assert_eq!(val.downcast_ref::<Rc<String>>().split(":").count(), 10_001);
     }
 
     #[test]
@@ -252,6 +339,29 @@ mod tests {
     }
 
     #[test]
+    fn test_mutex() {
+        let mutex = crate::Mutex::new();
+        let m1 = mutex.clone();
+        let m2 = mutex.clone();
+
+        let h1 = thread::spawn(move || {
+            m1.lock();
+            sleep(Duration::from_millis(100));
+            m1.unlock();
+        });
+
+        let h2 = thread::spawn(move || {
+            m2.lock();
+            m2.unlock();
+        });
+
+        h1.join().unwrap();
+        h2.join().unwrap();
+
+        drop(mutex);
+    }
+
+    #[test]
     fn test_thread_safe() {
         let mut x = AnyRef::new(String::from("hello"));
         let mut y = x.clone();
@@ -321,6 +431,11 @@ mod tests {
 
         let x = AnyRef::new(4);
         let _y = AnyRef::clone(&x);
-        assert_eq!(*AnyRef::try_unwrap::<i32>(x).unwrap_err().downcast_ref::<i32>(), 4);
+        assert_eq!(
+            *AnyRef::try_unwrap::<i32>(x)
+                .unwrap_err()
+                .downcast_ref::<i32>(),
+            4
+        );
     }
 }

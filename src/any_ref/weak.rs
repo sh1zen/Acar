@@ -2,7 +2,7 @@ use crate::WatchGuard;
 use crate::any_ref::downcast::Downcast;
 use crate::any_ref::inner::{AnyRefInner, MAX_REFCOUNT};
 use crate::any_ref::ptr_interface::PtrInterface;
-use crate::any_ref::wrapper::AnyRef;
+use crate::any_ref::strong::AnyRef;
 use crate::utils::is_dangling;
 use std::alloc::{Layout, dealloc};
 use std::any::{Any, TypeId};
@@ -14,6 +14,7 @@ use std::sync::atomic;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct WeakAnyRef {
     pub(crate) ptr: NonNull<AnyRefInner>,
 }

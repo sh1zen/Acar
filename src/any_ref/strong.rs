@@ -1,9 +1,10 @@
+use crate::Backoff;
+use crate::WatchGuard;
 use crate::any_ref::downcast::Downcast;
 use crate::any_ref::inner::{AnyRefInner, MAX_REFCOUNT};
 use crate::any_ref::ptr_interface::PtrInterface;
 use crate::any_ref::weak::WeakAnyRef;
 use crate::utils::is_dangling;
-use crate::WatchGuard;
 use std::any::{Any, TypeId};
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
@@ -27,9 +28,9 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new(42);
-    /// assert_eq!(a.as_ref::<i32>(), &42);
+    /// unsafe { assert_eq!(a.as_ref::<i32>(), &42); }
     /// ```
     pub fn new<T>(value: T) -> Self
     where
@@ -42,7 +43,7 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new(123i32);
     /// let value = AnyRef::try_unwrap::<i32>(a).unwrap();
     /// assert_eq!(value, 123i32);
@@ -73,10 +74,7 @@ impl AnyRef {
 
     pub(crate) fn inner(&self) -> &AnyRefInner {
         // This unsafety is ok because while this AnyRef is alive we're guaranteed
-        // that the inner pointer is valid. Furthermore, we know that the
-        // `AnyRefInner` structure itself is `Sync` because the inner data is
-        // `Sync` as well, so we're ok loaning out an immutable pointer to these
-        // contents.
+        // that the inner pointer is valid.
         let ptr: *mut AnyRefInner = NonNull::as_ptr(self.get_non_null_inner());
         unsafe { &*ptr }
     }
@@ -104,7 +102,7 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new(50);
     /// let ptr = a.as_cast_ptr::<i32>();
     /// assert_eq!(unsafe { *ptr }, 50);
@@ -124,12 +122,12 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new(String::from("hello"));
-    /// let any = a.as_ref_any();
+    /// let any = unsafe { a.as_ref_any() };
     /// assert_eq!(any.downcast_ref::<String>().unwrap(), "hello");
     /// ```
-    pub fn as_ref_any(&self) -> &dyn Any {
+    pub unsafe  fn as_ref_any(&self) -> &dyn Any {
         let ptr = self.as_ptr();
         unsafe { &*(ptr) }
     }
@@ -139,12 +137,12 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new(3.14f32);
-    /// let f = a.as_ref::<f32>();
+    /// let f = unsafe { a.as_ref::<f32>() };
     /// assert_eq!(*f, 3.14);
     /// ```
-    pub fn as_ref<T: Any>(&self) -> &T {
+    pub unsafe fn as_ref<T: Any>(&self) -> &T {
         let ptr = self.as_cast_ptr::<T>();
         unsafe { &*(ptr) }
     }
@@ -154,13 +152,13 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let mut a = AnyRef::new(3i32);
-    /// let mut f = a.as_mut::<i32>();
+    /// let f = unsafe { a.as_mut::<i32>() };
     /// *f += 3i32;
     /// assert_eq!(*f, 6i32);
     /// ```
-    pub fn as_mut<T: Any>(&mut self) -> &mut T {
+    pub unsafe fn as_mut<T: Any>(&mut self) -> &mut T {
         let ptr = self.as_cast_ptr::<T>();
         unsafe { &mut *(ptr as *mut T) }
     }
@@ -169,7 +167,7 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new("unique");
     /// assert!(AnyRef::is_unique(&a));
     /// let b = a.clone();
@@ -208,7 +206,7 @@ impl AnyRef {
     /// # Example
     ///
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let five = AnyRef::new(5);
     /// let weak_five = AnyRef::downgrade(&five);
     /// ```
@@ -254,7 +252,7 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new(10);
     /// let w = a.downgrade();
     /// assert_eq!(AnyRef::weak_count(&a), 1);
@@ -271,7 +269,7 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new("count");
     /// let b = a.clone();
     /// assert_eq!(AnyRef::strong_count(&a), 2);
@@ -305,6 +303,10 @@ impl AnyRef {
     pub fn from_raw<T: ?Sized>(ptr: *const T) -> Self {
         unsafe { Self::from_raw_in(ptr) }
     }
+
+    pub fn type_name(&self) -> &'static str {
+        self.inner().type_name
+    }
 }
 
 impl PtrInterface for AnyRef {
@@ -334,12 +336,13 @@ impl Downcast for AnyRef {
     }
 
     fn try_downcast_mut<'a, U: Any>(&'a mut self) -> Option<WatchGuard<'a, U>> {
-        let inner_ref = self.inner();
+        let inner_ref: &AnyRefInner = self.inner();
 
         if inner_ref.type_id == TypeId::of::<U>() {
             let lock = inner_ref.lock.clone();
             lock.lock();
 
+            //let ptr = inner_ref.get_ref()?;
             let ptr = unsafe { &mut *(self.as_ptr() as *mut dyn Any) };
             let ptr = ptr.downcast_mut::<U>()?;
             Some(WatchGuard::new(ptr, lock))
@@ -385,9 +388,9 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new(99);
-    /// let any_ptr = a.as_ref_any();
+    /// let any_ptr = unsafe { a.as_ref_any() };
     /// let val = AnyRef::cast_raw::<i32>(any_ptr);
     /// assert_eq!(*val.unwrap(), 99);
     /// ```
@@ -404,9 +407,9 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a: AnyRef = AnyRef::default_with::<String>();
-    /// assert_eq!(a.as_ref::<String>(), "");
+    /// unsafe { assert_eq!(a.as_ref::<String>(), ""); }
     /// ```
     pub fn default_with<T: 'static + Default>() -> Self {
         Self::from(Box::new(T::default()))
@@ -416,10 +419,10 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::new(0);
     /// let a = AnyRef::fill(a, 123);
-    /// assert_eq!(a.as_ref::<i32>(), &123);
+    /// unsafe { assert_eq!(a.as_ref::<i32>(), &123); }
     /// ```
     pub fn fill<T: 'static>(mut this: Self, value: T) -> Self {
         let ref_inner = &mut *this.inner_mut();
@@ -458,13 +461,13 @@ impl<T: 'static> From<*mut T> for AnyRef {
     ///
     /// # Example
     /// ```
-    /// use castbox::{create_raw_pointer, dealloc_layout, dealloc_raw_pointer};
-    /// use crate::castbox::{AnyRef, Downcast};
+    /// use castbox::{create_raw_pointer, dealloc_layout};
+    /// use castbox::{AnyRef, Downcast};
     /// let raw = create_raw_pointer(String::from("hello"));
     /// let mut a = AnyRef::from(raw);
     /// a.downcast_mut::<String>().push_str(":1");
     /// dealloc_layout(raw);
-    /// assert_eq!(a.as_ref::<String>(), "hello:1");
+    /// unsafe { assert_eq!(a.as_ref::<String>(), "hello:1"); }
     /// ```
     #[inline]
     fn from(ptr: *mut T) -> Self {
@@ -478,9 +481,9 @@ impl From<&str> for AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let a = AnyRef::from("hello");
-    /// assert_eq!(a.as_ref::<String>(), &"hello");
+    /// unsafe { assert_eq!(a.as_ref::<String>(), &"hello"); }
     /// ```
     #[inline]
     fn from(s: &str) -> Self {
@@ -494,10 +497,10 @@ impl<T: 'static> From<Box<T>> for AnyRef {
     ///
     /// # Example
     /// ```
-    /// use crate::castbox::AnyRef;
+    /// use castbox::AnyRef;
     /// let boxed = Box::new("hello");
     /// let a = AnyRef::from(boxed);
-    /// assert_eq!(a.as_ref::<&str>(), &"hello");
+    /// unsafe { assert_eq!(a.as_ref::<&str>(), &"hello"); }
     /// ```
     #[inline]
     fn from(b: Box<T>) -> Self
@@ -509,8 +512,13 @@ impl<T: 'static> From<Box<T>> for AnyRef {
 }
 
 impl fmt::Debug for AnyRef {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&format!("AnyRef::<{}>", self.inner().type_name))
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let inner = self.inner();
+        f.debug_struct("AnyRef")
+            .field("type", &inner.type_name)
+            .field("S", &inner.strong)
+            .field("W", &inner.weak)
+            .finish()
     }
 }
 
