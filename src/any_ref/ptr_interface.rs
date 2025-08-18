@@ -1,22 +1,20 @@
-#![allow(dead_code)]
 use crate::any_ref::inner::AnyRefInner;
 use crate::utils::is_dangling;
 use std::any::Any;
 use std::mem::offset_of;
 use std::ptr;
-use std::ptr::NonNull;
 
 pub(crate) trait PtrInterface
 where
     Self: Sized,
 {
-    fn get_non_null_inner(&self) -> NonNull<AnyRefInner>;
+    fn get_mut_inner_ptr(&self) -> *mut AnyRefInner;
 
-    unsafe fn from_inner_in(ptr: NonNull<AnyRefInner>) -> Self;
+    unsafe fn from_inner_in(ptr: *mut AnyRefInner) -> Self;
 
     #[inline]
     unsafe fn from_ptr_in(ptr: *mut AnyRefInner) -> Self {
-        unsafe { Self::from_inner_in(NonNull::new_unchecked(ptr)) }
+        unsafe { Self::from_inner_in(ptr) }
     }
 
     unsafe fn read_data<T>(&self) -> T {
@@ -24,7 +22,7 @@ where
     }
 
     fn as_ptr(&self) -> *const dyn Any {
-        let ptr: *mut AnyRefInner = NonNull::as_ptr(self.get_non_null_inner());
+        let ptr: *mut AnyRefInner = self.get_mut_inner_ptr();
 
         if is_dangling(ptr) {
             // If the pointer is dangling, we return the sentinel directly. This cannot be
@@ -42,7 +40,7 @@ where
         unsafe { Self::from_ptr_in(ptr) }
     }
 
-    unsafe fn from_inner(ptr: NonNull<AnyRefInner>) -> Self {
+    unsafe fn from_inner(ptr: *mut AnyRefInner) -> Self {
         unsafe { Self::from_inner_in(ptr) }
     }
 

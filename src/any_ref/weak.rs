@@ -1,22 +1,22 @@
-use crate::WatchGuard;
+use crate::WatchGuardMut;
 use crate::any_ref::downcast::Downcast;
 use crate::any_ref::inner::{AnyRefInner, MAX_REFCOUNT};
 use crate::any_ref::ptr_interface::PtrInterface;
 use crate::any_ref::strong::AnyRef;
+use crate::mutex::WatchGuardRef;
 use crate::utils::is_dangling;
 use std::alloc::{Layout, dealloc};
 use std::any::{Any, TypeId};
 use std::num::NonZeroUsize;
 use std::process::abort;
 use std::ptr;
-use std::ptr::NonNull;
 use std::sync::atomic;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-#[repr(C)]
 #[derive(Debug)]
+#[repr(transparent)]
 pub struct WeakAnyRef {
-    pub(crate) ptr: NonNull<AnyRefInner>,
+    pub(crate) ptr: *const AnyRefInner,
 }
 
 unsafe impl Send for WeakAnyRef {}
@@ -36,8 +36,6 @@ impl WeakAnyRef {
         let ptr: *const AnyRefInner = ptr::without_provenance(NonZeroUsize::MAX.get());
         let ptr = ptr as *mut AnyRefInner;
         // SAFETY: we know `addr` is non-zero.
-        let ptr = unsafe { NonNull::new_unchecked(ptr) };
-
         WeakAnyRef { ptr }
     }
 
@@ -72,7 +70,7 @@ impl WeakAnyRef {
             .is_ok()
         {
             // SAFETY: pointer is not null, verified in checked_increment
-            unsafe { Some(AnyRef::from_inner_in(self.ptr)) }
+            unsafe { Some(AnyRef::from_inner_in(self.get_mut_inner_ptr())) }
         } else {
             None
         }
@@ -80,7 +78,7 @@ impl WeakAnyRef {
 
     #[inline]
     fn inner(&self) -> Option<&AnyRefInner> {
-        let ptr = self.ptr.as_ptr();
+        let ptr = self.ptr;
         if is_dangling(ptr) {
             None
         } else {
@@ -164,28 +162,34 @@ impl Default for WeakAnyRef {
 }
 
 impl Downcast for WeakAnyRef {
-    fn try_downcast_ref<U: Any>(&self) -> Option<&U> {
-        if self.inner()?.type_id == TypeId::of::<U>() {
-            match self.inner()?.get_ref() {
-                Some(ptr) => ptr.downcast_ref::<U>(),
-                None => None,
-            }
+    fn try_downcast_ref<U: Any>(&self) -> Option<WatchGuardRef<'_, U>> {
+        let inner_ref: &AnyRefInner = self.inner()?;
+
+        if inner_ref.type_id == TypeId::of::<U>() {
+            let lock = inner_ref.lock.clone();
+            lock.lock_group();
+
+            let data = inner_ref.get_ref()?.downcast_ref::<U>()?;
+            Some(WatchGuardRef::new(data, lock))
         } else {
             None
         }
     }
 
-    fn try_downcast_mut<'a, U: Any>(&'a mut self) -> Option<WatchGuard<'a, U>> {
+    fn try_downcast_mut<U: Any>(&mut self) -> Option<WatchGuardMut<'_, U>> {
         None
     }
 }
 
 impl PtrInterface for WeakAnyRef {
-    fn get_non_null_inner(&self) -> NonNull<AnyRefInner> {
-        self.ptr
+    #[inline]
+    fn get_mut_inner_ptr(&self) -> *mut AnyRefInner {
+        self.ptr as *mut AnyRefInner
     }
 
-    unsafe fn from_inner_in(ptr: NonNull<AnyRefInner>) -> Self {
+    #[inline]
+    unsafe fn from_inner_in(ptr: *mut AnyRefInner) -> Self {
+        debug_assert!(!ptr.is_null());
         Self { ptr }
     }
 }
@@ -201,7 +205,7 @@ impl Drop for WeakAnyRef {
             atomic::fence(Acquire);
 
             let layout = Layout::new::<AnyRefInner>();
-            let ptr = self.ptr.as_ptr() as *mut u8;
+            let ptr = self.ptr as *mut u8;
 
             unsafe {
                 //drop(Box::from_raw(self.ptr.as_ptr()));

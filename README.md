@@ -25,7 +25,7 @@ It is ideal for scenarios where type erasure and runtime polymorphism are needed
 use castbox::AnyRef;
 
 let a = AnyRef::new(42i32);
-assert_eq!(a.as_ref::<i32>(), &42);
+unsafe { assert_eq!(a.as_ref::<i32>(), &42) };
 ```
 
 ### Runtime Downcasting

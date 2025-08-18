@@ -1,14 +1,50 @@
 use crate::Backoff;
-use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::ptr::{NonNull, null_mut};
+use std::ptr::null_mut;
 use std::sync::atomic;
-use std::sync::atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use std::{fmt, ptr};
 
-const AVAILABLE: u8 = 0;
-const UPDATING: u8 = 1;
+#[test]
+fn test_atomic_vec() {
+    use std::thread;
+    let vec = AtomicVec::new();
+    let vec_c = vec.clone();
+
+    vec_c.push(10);
+    vec.push(20);
+    vec_c.push(30);
+    assert_eq!(vec.pop().unwrap(), 10);
+    assert_eq!(vec.pop().unwrap(), 20);
+    assert_eq!(vec.pop().unwrap(), 30);
+
+    let mut handles = vec![];
+
+    for _ in 0..100 {
+        let vec_c = vec.clone();
+        handles.push(thread::spawn(move || {
+            vec_c.push(10);
+        }));
+
+        let vec_c = vec.clone();
+        handles.push(thread::spawn(move || {
+            vec_c.pop();
+        }));
+    }
+
+    for h in handles {
+        h.join().unwrap();
+    }
+
+    for _ in 0..100 {
+        vec_c.pop();
+    }
+
+    assert!(vec.pop().is_none());
+}
+const AVAILABLE: bool = true;
+const UPDATING: bool = false;
 
 /// Atomic Vec operations lock free
 struct AtomicInner<T> {
@@ -22,18 +58,15 @@ struct AtomicInner<T> {
     len: AtomicUsize,
 
     /// vec state
-    state: AtomicU8,
+    state: AtomicBool,
 
     /// cloned ref
     ref_count: AtomicUsize,
-
-    /// Indicates that dropping a `AtomicVec<T>` may drop values of type `T`.
-    _marker: PhantomData<T>,
 }
 
 #[repr(transparent)]
 pub struct AtomicVec<T> {
-    ptr: NonNull<AtomicInner<T>>,
+    ptr: *const AtomicInner<T>,
 }
 
 unsafe impl<T: Send> Send for AtomicVec<T> {}
@@ -48,18 +81,18 @@ impl<T> AtomicVec<T> {
             head: AtomicPtr::new(null_mut()),
             tail: AtomicPtr::new(null_mut()),
             len: AtomicUsize::new(0),
-            state: AtomicU8::new(0),
-            _marker: PhantomData,
+            state: AtomicBool::new(AVAILABLE),
             ref_count: AtomicUsize::new(1),
         }));
-        Self {
-            ptr: NonNull::new(ptr).expect("Happened an invalid allocation for AtomicVec"),
+        if ptr.is_null() {
+            panic!("Happened an invalid allocation for AtomicVec");
         }
+        Self { ptr }
     }
 
     #[inline(always)]
     fn inner(&self) -> &AtomicInner<T> {
-        unsafe { self.ptr.as_ref() }
+        unsafe { &*self.ptr }
     }
 
     pub fn push(&self, val: T) {
@@ -82,13 +115,14 @@ impl<T> AtomicVec<T> {
 
         self.release();
 
-        inner.len.fetch_add(1, Ordering::Release);
+        inner.len.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn pop(&self) -> Option<T> {
         let inner = self.inner();
 
         self.lock();
+
         let head = inner.head.load(Ordering::Acquire);
 
         if head.is_null() {
@@ -113,7 +147,7 @@ impl<T> AtomicVec<T> {
         let value = unsafe { ManuallyDrop::into_inner(ptr::read(&(*head).value)) };
         unsafe { drop(Box::from_raw(head)) };
 
-        inner.len.fetch_sub(1, Ordering::Release);
+        inner.len.fetch_sub(1, Ordering::Relaxed);
 
         Some(value)
     }
@@ -129,7 +163,7 @@ impl<T> AtomicVec<T> {
     }
 
     pub fn is_busy(&self) -> bool {
-        self.inner().state.load(Ordering::Relaxed) != AVAILABLE
+        !self.inner().state.load(Ordering::Relaxed)
     }
 
     #[inline]
@@ -181,9 +215,9 @@ impl<T> Drop for AtomicVec<T> {
         if self.inner().ref_count.fetch_sub(1, Ordering::Release) == 1 {
             atomic::fence(Ordering::Release);
 
-            unsafe {
-                drop(Box::from_raw(self.ptr.as_ptr()));
-            }
+            let ptr = self.ptr as *mut AtomicInner<T>;
+
+            unsafe { drop(Box::from_raw(ptr)) };
         }
     }
 }

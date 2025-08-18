@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use core::cell::Cell;
 use core::fmt;
 use std::{hint, thread};
@@ -54,13 +53,8 @@ impl Backoff {
     /// The processor may yield using the *YIELD* or *PAUSE* instruction and the current thread
     /// may yield by giving up a timeslice to the OS scheduler.
     ///
-    /// In `#[no_std]` environments, this method is equivalent to [`spin`].
-    ///
     /// If possible, use [`is_completed`] to check when it is advised to stop using backoff and
     /// block the current thread using a different synchronization mechanism instead.
-    ///
-    /// [`spin`]: Backoff::spin
-    /// [`is_completed`]: Backoff::is_completed
     #[inline]
     pub(crate) fn snooze(&self) {
         if self.step.get() <= SPIN_LIMIT {
@@ -80,6 +74,12 @@ impl Backoff {
     #[inline]
     pub(crate) fn is_completed(&self) -> bool {
         self.step.get() > YIELD_LIMIT
+    }
+
+    /// Returns `true` if exponential backoff has completed the spinning threshold.
+    #[inline]
+    pub(crate) fn is_yielding(&self) -> bool {
+        self.step.get() > SPIN_LIMIT
     }
 }
 

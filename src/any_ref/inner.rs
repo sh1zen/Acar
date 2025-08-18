@@ -7,7 +7,6 @@ use std::sync::atomic::Ordering::Acquire;
 pub(super) const MAX_REFCOUNT: usize = isize::MAX as usize;
 
 /// Actually the main worker of AnyRef
-#[repr(C)]
 pub(crate) struct AnyRefInner {
     pub(crate) data: Box<dyn Any>,
     pub(crate) type_id: TypeId,
@@ -42,7 +41,7 @@ impl AnyRefInner {
     }
 
     #[inline(always)]
-    pub(crate) fn is_valid(&self) -> bool {
+    fn is_valid(&self) -> bool {
         self.strong.load(Acquire) > 0
     }
 
@@ -53,8 +52,7 @@ impl AnyRefInner {
             None
         }
     }
-
-    #[allow(dead_code)]
+    
     pub(crate) fn get_mut_ref(&mut self) -> Option<&mut dyn Any> {
         if self.is_valid() {
             Some(&mut *self.data)
