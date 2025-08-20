@@ -1,14 +1,14 @@
 [package]
 name = "castbox"
-version = "0.0.5"
+version = "0.0.6"
 authors = ["sh1zen dev.sh1zen@outlook.it"]
 edition = "2024"
-description = "A Runtime-Typed Reference-Counted Smart Pointer"
+description = "A Runtime-Typed Reference-Counted Smart Pointer and concurrent programming tools."
 license = "Apache-2.0"
 repository = "https://github.com/sh1zen/castbox"
 documentation = "https://docs.rs/castbox"
 readme = "README.md"
-keywords = ["arc", "dyn-any", "thread-safe", "reference-counted", "atomic"]
+keywords = ["lock-free", "dyn-any", "thread-safe", "reference-counted", "atomic"]
 categories = ["data-structures", "concurrency", "memory-management", "development-tools"]
 exclude = [".gitignore", ".github/*"]
 homepage = "https://github.com/sh1zen/castbox"
@@ -16,8 +16,3 @@ homepage = "https://github.com/sh1zen/castbox"
 [lib]
 name = "castbox"
 path = "src/lib.rs"
-
-[[example]]
-name = "thread_safe"
-path = "examples/thread_safe.rs"
-

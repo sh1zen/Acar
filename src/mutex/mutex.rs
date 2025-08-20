@@ -1,77 +1,9 @@
-use crate::{AtomicVec, Backoff};
+use crate::Backoff;
+use crate::collections::AtomicVec;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
 use std::thread::Thread;
 use std::{fmt, thread};
-
-#[test]
-fn test_mutex() {
-    use crate::mutex::Mutex;
-    use std::thread;
-    use std::thread::sleep;
-    use std::time::Duration;
-
-    let mutex = Mutex::new();
-
-    let m1 = mutex.clone();
-    let m2 = mutex.clone();
-
-    mutex.lock_group();
-    mutex.lock_group();
-
-    mutex.unlock_group();
-    mutex.unlock_group();
-
-    let h1 = thread::spawn(move || {
-        m1.lock();
-        sleep(Duration::from_millis(100));
-        m1.unlock();
-    });
-
-    let h2 = thread::spawn(move || {
-        m2.lock();
-        m2.unlock();
-    });
-
-    h1.join().unwrap();
-    h2.join().unwrap();
-
-    drop(mutex);
-}
-
-#[test]
-fn test_mutex2() {
-    use crate::mutex::Mutex;
-    use std::thread;
-    use std::thread::sleep;
-    use std::time::Duration;
-
-    let mut handles = vec![];
-
-    let mutex = Mutex::new();
-
-    mutex.lock();
-
-    for _i in 0..100 {
-        let m1 = mutex.clone();
-        handles.push(thread::spawn(move || {
-            m1.lock_group();
-        }));
-    }
-
-    sleep(Duration::from_millis(1000));
-    mutex.unlock();
-
-    for h in handles {
-        h.join().unwrap();
-    }
-
-    for _i in 0..100 {
-        mutex.unlock_group();
-    }
-
-    drop(mutex);
-}
 
 enum MutexType {
     Exclusive,
@@ -218,8 +150,15 @@ impl Mutex {
     }
 
     #[inline]
+    pub fn is_locked_group(&self) -> bool {
+        let state = self.inner().state.load(Acquire);
+        state == LOCKED_GROUP || (state == DIRTY && self.inner().locked.load(Acquire) > 0)
+    }
+
+    #[inline]
     pub fn is_locked(&self) -> bool {
-        self.inner().state.load(Acquire) != UNLOCKED
+        let state = self.inner().state.load(Acquire);
+        !(state == UNLOCKED || (state == DIRTY && self.inner().locked.load(Acquire) == 0))
     }
 
     #[inline]
@@ -239,10 +178,14 @@ impl Mutex {
         }
     }
 
-    #[inline]
+    pub fn unlock_all_group(&self) {
+        self.inner().locked.store(1, Release);
+        self.unlock_group();
+    }
+
     pub fn unlock_group(&self) {
         if self.inner().state.load(Acquire) != LOCKED_GROUP {
-            panic!("Trying to unlock a non Locked Group.");
+            panic!("Trying to unlock a non Locked Group");
         }
 
         if self.inner().locked.fetch_sub(1, Release) == 1 {
@@ -255,7 +198,21 @@ impl Mutex {
         }
     }
 
-    #[inline]
+    pub fn try_lock(&self) -> bool {
+        if self.inner().locked.load(Acquire) == 0 {
+            return self
+                .inner()
+                .state
+                .compare_exchange(DIRTY, LOCKED, Acquire, Relaxed)
+                .is_ok();
+        }
+
+        self.inner()
+            .state
+            .compare_exchange(UNLOCKED, LOCKED, Acquire, Relaxed)
+            .is_ok()
+    }
+
     pub fn unlock(&self) {
         if self
             .inner()

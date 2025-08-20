@@ -13,7 +13,6 @@ use std::ptr;
 use std::sync::atomic;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-#[derive(Debug)]
 #[repr(transparent)]
 pub struct WeakAnyRef {
     pub(crate) ptr: *const AnyRefInner,

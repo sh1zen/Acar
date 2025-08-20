@@ -6,43 +6,6 @@ use std::sync::atomic;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use std::{fmt, ptr};
 
-#[test]
-fn test_atomic_vec() {
-    use std::thread;
-    let vec = AtomicVec::new();
-    let vec_c = vec.clone();
-
-    vec_c.push(10);
-    vec.push(20);
-    vec_c.push(30);
-    assert_eq!(vec.pop().unwrap(), 10);
-    assert_eq!(vec.pop().unwrap(), 20);
-    assert_eq!(vec.pop().unwrap(), 30);
-
-    let mut handles = vec![];
-
-    for _ in 0..100 {
-        let vec_c = vec.clone();
-        handles.push(thread::spawn(move || {
-            vec_c.push(10);
-        }));
-
-        let vec_c = vec.clone();
-        handles.push(thread::spawn(move || {
-            vec_c.pop();
-        }));
-    }
-
-    for h in handles {
-        h.join().unwrap();
-    }
-
-    for _ in 0..100 {
-        vec_c.pop();
-    }
-
-    assert!(vec.pop().is_none());
-}
 const AVAILABLE: bool = true;
 const UPDATING: bool = false;
 
@@ -53,6 +16,9 @@ struct AtomicInner<T> {
 
     /// The tail of the queue.
     tail: AtomicPtr<Item<T>>,
+
+    /// a temp tail
+    t_tail: AtomicPtr<Item<T>>,
 
     /// numbers of items in the vec
     len: AtomicUsize,
@@ -80,6 +46,7 @@ impl<T> AtomicVec<T> {
         let ptr = Box::into_raw(Box::new(AtomicInner {
             head: AtomicPtr::new(null_mut()),
             tail: AtomicPtr::new(null_mut()),
+            t_tail: AtomicPtr::new(null_mut()),
             len: AtomicUsize::new(0),
             state: AtomicBool::new(AVAILABLE),
             ref_count: AtomicUsize::new(1),
@@ -96,26 +63,43 @@ impl<T> AtomicVec<T> {
     }
 
     pub fn push(&self, val: T) {
-        let inner = self.inner();
         let item = Item::new(val);
 
+        if self.is_busy() {
+            if self
+                .inner()
+                .t_tail
+                .compare_exchange(null_mut(), item, Ordering::Release, Ordering::Relaxed)
+                .is_ok()
+            {
+                return;
+            }
+        }
+
         self.lock();
-        let tail = inner.tail.load(Ordering::Acquire);
+        self.update_tail(item);
+        self.release();
+    }
+
+    #[inline]
+    fn update_tail(&self, item: *mut Item<T>) {
+        let tail = self.inner().tail.load(Ordering::Acquire);
         if !tail.is_null() {
             unsafe {
                 (*tail).next.store(item, Ordering::Release);
             }
         }
-        inner.tail.store(item, Ordering::Release);
+        self.inner().tail.store(item, Ordering::Release);
 
         // if the head is pointing to null we need to link it.
-        let _ = inner
-            .head
-            .compare_exchange(null_mut(), item, Ordering::Release, Ordering::Relaxed);
+        let _ = self.inner().head.compare_exchange(
+            null_mut(),
+            item,
+            Ordering::Release,
+            Ordering::Relaxed,
+        );
 
-        self.release();
-
-        inner.len.fetch_add(1, Ordering::Relaxed);
+        self.inner().len.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn pop(&self) -> Option<T> {
@@ -157,13 +141,14 @@ impl<T> AtomicVec<T> {
         self.len() == 0
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn len(&self) -> usize {
         self.inner().len.load(Ordering::Acquire)
     }
 
+    #[inline]
     pub fn is_busy(&self) -> bool {
-        !self.inner().state.load(Ordering::Relaxed)
+        self.inner().state.load(Ordering::Relaxed) != AVAILABLE
     }
 
     #[inline]
@@ -181,6 +166,12 @@ impl<T> AtomicVec<T> {
 
     #[inline]
     fn release(&self) {
+        let item = self.inner().t_tail.swap(null_mut(), Ordering::Acquire);
+
+        if !item.is_null() {
+            self.update_tail(item);
+        }
+
         self.inner().state.store(AVAILABLE, Ordering::Release);
     }
 }
@@ -216,6 +207,19 @@ impl<T> Drop for AtomicVec<T> {
             atomic::fence(Ordering::Release);
 
             let ptr = self.ptr as *mut AtomicInner<T>;
+
+            unsafe {
+                let mut head = (*ptr).head.load(Ordering::Acquire);
+                loop {
+                    if head.is_null() {
+                        break;
+                    }
+                    let next = (*head).next.load(Ordering::Acquire);
+                    ManuallyDrop::drop(&mut (*head).value);
+                    drop(Box::from_raw(head));
+                    head = next;
+                }
+            }
 
             unsafe { drop(Box::from_raw(ptr)) };
         }

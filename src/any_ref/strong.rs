@@ -46,12 +46,14 @@ impl AnyRef {
     /// assert_eq!(value, 123i32);
     /// ```
     pub fn try_unwrap<T>(this: Self) -> Result<T, Self> {
+        this.inner().lock.lock();
         if this
             .inner()
             .strong
             .compare_exchange(1, 0, Relaxed, Relaxed)
             .is_err()
         {
+            this.inner().lock.unlock();
             return Err(this);
         }
 
@@ -277,7 +279,7 @@ impl AnyRef {
         data_ptr
     }
 
-    pub fn from_raw<T: ?Sized>(ptr: *const T) -> Self {
+    pub unsafe fn from_raw<T: ?Sized>(ptr: *const T) -> Self {
         unsafe { Self::from_raw_in(ptr) }
     }
 
@@ -351,9 +353,10 @@ impl Clone for AnyRef {
 impl Default for AnyRef {
     fn default() -> AnyRef {
         unsafe {
-            Self::from_inner(
-                Box::leak(Box::write(Box::new_uninit(), AnyRefInner::default()))
-            )
+            Self::from_inner(Box::leak(Box::write(
+                Box::new_uninit(),
+                AnyRefInner::default(),
+            )))
         }
     }
 }
@@ -382,8 +385,10 @@ impl AnyRef {
     /// ```
     pub fn fill<T: 'static>(mut this: Self, value: T) -> Self {
         let ref_inner = &mut *this.inner_mut();
+        ref_inner.lock.lock();
         ref_inner.data = Box::new(value);
         ref_inner.type_id = TypeId::of::<T>();
+        ref_inner.lock.unlock();
         this
     }
 }
@@ -417,7 +422,7 @@ impl<T: 'static> From<*mut T> for AnyRef {
     ///
     /// # Example
     /// ```
-    /// use castbox::{create_raw_pointer, dealloc_layout};
+    /// use castbox::utils::{create_raw_pointer, dealloc_layout};
     /// use castbox::{AnyRef, Downcast};
     /// let raw = create_raw_pointer(String::from("hello"));
     /// let mut a = AnyRef::from(raw);

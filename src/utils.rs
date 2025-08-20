@@ -1,5 +1,6 @@
 use std::alloc::{Layout, alloc, dealloc};
-use std::ptr;
+use std::{ptr, thread};
+use std::time::Instant;
 
 /// Calculate layout for `T` using the inner value's layout
 pub(crate) fn memory_layout_for_t<T>(layout: Layout) -> Layout {
@@ -40,4 +41,15 @@ pub fn dealloc_raw_pointer<T>(raw: *mut T) {
         ptr::drop_in_place(raw);
         dealloc_layout::<T>(raw);
     }
+}
+
+pub fn wait_until(deadline: Instant, pred: impl Fn() -> bool) -> bool {
+    while Instant::now() < deadline {
+        if pred() {
+            return true;
+        }
+        std::hint::spin_loop();
+        thread::yield_now();
+    }
+    false
 }

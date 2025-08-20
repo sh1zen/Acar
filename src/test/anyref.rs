@@ -1,6 +1,4 @@
-#[cfg(test)]
-
-mod tests {
+mod tests_any_ref {
     use crate::{AnyRef, Downcast, WatchGuardRef, WeakAnyRef};
     use std::any::TypeId;
     use std::sync::Barrier;
@@ -9,17 +7,7 @@ mod tests {
     use std::thread;
 
     #[test]
-    fn test_map() {
-        let x = AnyRef::new(5i32);
-        assert_eq!(
-            *x.map(|x: WatchGuardRef<'_, i32>| (*x * 2) as u64)
-                .downcast_ref::<u64>(),
-            10u64
-        );
-    }
-
-    #[test]
-    fn test_send() {
+    fn stress_test() {
         let a = AnyRef::new("hello".to_string());
 
         if let Some(s) = a.try_downcast_ref::<String>() {
@@ -60,6 +48,15 @@ mod tests {
         assert_eq!(val.downcast_ref::<String>().split(":").count(), 10_001);
     }
 
+    #[test]
+    fn test_map() {
+        let x = AnyRef::new(5i32);
+        assert_eq!(
+            *x.map(|x: WatchGuardRef<'_, i32>| (*x * 2) as u64)
+                .downcast_ref::<u64>(),
+            10u64
+        );
+    }
     #[test]
     fn new_and_type() {
         let x = AnyRef::new(42u32);
@@ -176,7 +173,7 @@ mod tests {
         let x = AnyRef::new(String::from("hello"));
         let raw = AnyRef::into_raw(x);
 
-        let y = AnyRef::from_raw(raw);
+        let y = unsafe { AnyRef::from_raw(raw) };
         let val = y.downcast_ref::<String>();
         assert_eq!(val, "hello");
     }

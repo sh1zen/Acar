@@ -8,7 +8,6 @@
     )
 ))]
 #![warn(
-    missing_debug_implementations,
     rust_2024_compatibility,
     rust_2018_idioms,
     rustdoc::broken_intra_doc_links,
@@ -17,13 +16,14 @@
 
 mod any_ref;
 mod mutex;
-mod utils;
+pub mod utils;
 
-mod collections;
-mod tests;
+pub mod collections;
+
+#[cfg(test)]
+mod test;
 
 pub use any_ref::{AnyRef, Downcast, WeakAnyRef};
-pub use collections::AtomicVec;
 pub(crate) use mutex::Backoff;
-pub use mutex::{Mutex, WatchGuardMut, WatchGuardRef, WatchGuard};
-pub use utils::{create_raw_pointer, dealloc_layout, dealloc_raw_pointer};
+pub use mutex::{Mutex, WatchGuard, WatchGuardMut, WatchGuardRef};
+
