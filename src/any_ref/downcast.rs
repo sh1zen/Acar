@@ -1,5 +1,4 @@
-use crate::WatchGuardMut;
-use crate::mutex::WatchGuardRef;
+use crate::mutex::{WatchGuardMut, WatchGuardRef};
 use std::any::Any;
 
 pub trait Downcast {

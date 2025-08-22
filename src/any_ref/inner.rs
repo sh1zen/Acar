@@ -52,7 +52,7 @@ impl AnyRefInner {
             None
         }
     }
-    
+
     pub(crate) fn get_mut_ref(&mut self) -> Option<&mut dyn Any> {
         if self.is_valid() {
             Some(&mut *self.data)

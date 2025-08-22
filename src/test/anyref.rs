@@ -1,5 +1,6 @@
 mod tests_any_ref {
-    use crate::{AnyRef, Downcast, WatchGuardRef, WeakAnyRef};
+    use crate::mutex::WatchGuardRef;
+    use crate::{AnyRef, Downcast, WeakAnyRef};
     use std::any::TypeId;
     use std::sync::Barrier;
     use std::sync::atomic::AtomicU8;

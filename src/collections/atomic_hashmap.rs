@@ -1,5 +1,4 @@
-use crate::mutex::Backoff;
-use crate::{Mutex, WatchGuardMut, WatchGuardRef};
+use crate::mutex::{Backoff, Mutex, WatchGuardMut, WatchGuardRef};
 use std::borrow::Borrow;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt;

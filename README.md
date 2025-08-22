@@ -24,6 +24,16 @@
 - ⚡ Optimized for high concurrency and low contention
 - 🧠 Ideal for shared caches, state maps, and runtime-managed data
 
+## ✨ Arw — Atomic Reference Counted Mutable
+
+**Arw** is an atomic smart pointer with fine-grained internal locking and strong/weak reference counting. It provides safe data sharing across threads, controlled concurrent access, and raw pointer conversions without relying on kernel-level mutexes.
+
+- ✅ Atomic strong/weak reference counting
+- 🔐 Fine-grained internal lock for mutable or shared access
+- 🔁 Safe downgrade to WeakArw and try_unwrap for unique value recovery
+- ⚡ Optimized for concurrency with low overhead (spin + atomic fences)
+- 🧠 Suitable for shared data structures, caches, and custom concurrent primitives
+
 ## ✨ Mutex — User-Space Fast Mutex for Rust
 
 **Mutex** is a high-performance user-space mutex supporting exclusive and group locks. Built on atomic primitives and exponential backoff, it minimizes kernel-level contention while providing safe multi-threaded access control.
@@ -53,26 +63,51 @@ It is ideal for scenarios where type erasure and runtime polymorphism are needed
 ### AtomicHashMap
 
 ```rust
-    use std::thread;
-    use castbox::collections::AtomicHashMap;
+use std::thread;
+use castbox::collections::AtomicHashMap;
     
-    let h = AtomicHashMap::new();
+let h = AtomicHashMap::new();
 
-    h.insert("c", "hello");
-    let b = h.clone();
-    drop(h);
+h.insert("c", "hello");
+let b = h.clone();
+drop(h);
 
-    {
-        let b = b.clone();
-        let t = thread::spawn(move || {
-            if let Some(mut v) = b.get_mut("c") {
-                *v = "world"
-            }
-        });
-        t.join().unwrap();
-    }
+{
+    let b = b.clone();
+    let t = thread::spawn(move || {
+        if let Some(mut v) = b.get_mut("c") {
+            *v = "world"
+        }
+    });
+    t.join().unwrap();
+}
 
-    assert_eq!(b.get("c").unwrap(), "world");
+assert_eq!(b.get("c").unwrap(), "world");
+```
+
+### AtomicVec
+
+```rust
+use std::thread;
+use castbox::collections::AtomicVec;
+    
+let h = AtomicVec::new();
+
+h.push("hello");
+let b = h.clone();
+drop(h);
+
+{
+    let b = b.clone();
+    let t = thread::spawn(move || {
+        if let Some(v) = b.pop("c") {
+            assert_eq!(v, "hello");
+        }
+    });
+    t.join().unwrap();
+}
+
+assert!(b.pop().is_none());
 ```
 
 ### AnyRef
@@ -84,7 +119,7 @@ use std::thread;
 let mut handles = vec![];
 let a_ref = AnyRef::new(String::from("hello"));
 
-unsafe { assert_eq!(a_ref.as_ref::<String>(), "hello") };
+assert_eq!(a_ref.as_ref::<String>(), "hello");
 let b = a_ref.clone();
 if let Some(s) = a_ref.try_downcast_ref::<String>() {
     assert_eq!(s, "hello");
@@ -127,7 +162,7 @@ assert_eq!(WeakAnyRef::weak_count(&w), 1);
 ### Mutex
 
 ```rust
-use castbox::Mutex;
+use castbox::mutex::Mutex;
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
@@ -169,7 +204,7 @@ Open your Cargo.toml and add:
 
 ```toml
 [dependencies]
-castbox = "0.0.6" # or the latest version available 
+castbox = "0.0.7" # or the latest version available 
 ```
 ---
 

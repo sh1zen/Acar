@@ -15,15 +15,15 @@
 )]
 
 mod any_ref;
-mod mutex;
+pub mod mutex;
 pub mod utils;
 
 pub mod collections;
 
 #[cfg(test)]
 mod test;
+mod arw;
 
 pub use any_ref::{AnyRef, Downcast, WeakAnyRef};
-pub(crate) use mutex::Backoff;
-pub use mutex::{Mutex, WatchGuard, WatchGuardMut, WatchGuardRef};
+pub use arw::{Arw, WeakArw};
 

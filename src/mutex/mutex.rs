@@ -1,5 +1,5 @@
-use crate::Backoff;
 use crate::collections::AtomicVec;
+use crate::mutex::Backoff;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
 use std::thread::Thread;

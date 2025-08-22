@@ -1,4 +1,4 @@
-use crate::Backoff;
+use crate::mutex::Backoff;
 use std::mem::ManuallyDrop;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::ptr::null_mut;

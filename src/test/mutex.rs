@@ -1,5 +1,5 @@
 mod test_mutex {
-    use crate::Mutex;
+    use crate::mutex::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};
     use std::thread;
