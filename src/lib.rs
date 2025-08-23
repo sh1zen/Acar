@@ -24,6 +24,6 @@ pub mod collections;
 mod test;
 mod arw;
 
-pub use any_ref::{AnyRef, Downcast, WeakAnyRef};
+pub use any_ref::{AnyRef, WeakAnyRef};
 pub use arw::{Arw, WeakArw};
 

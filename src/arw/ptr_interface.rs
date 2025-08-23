@@ -17,7 +17,7 @@ where
     }
 
     unsafe fn read_data(&self) -> T {
-        unsafe { ptr::read(self.as_ptr() as *const T) }
+        unsafe { ptr::read(self.as_ptr()) }
     }
 
     fn as_ptr(&self) -> *const T {
@@ -31,11 +31,7 @@ where
             // SAFETY: if is_dangling returns false, then the pointer is dereferenceable.
             // The payload may be dropped at this point, and we have to maintain provenance,
             // so use raw pointer manipulation.
-
-            // SAFETY: This cannot go through Deref::deref or RcInnerPtr::inner because
-            // this is required to retain raw/mut provenance such that e.g. `get_mut` can
-            // write through the pointer after the Rc is recovered through `from_raw`.
-            unsafe { &raw mut (*ptr).val }
+            unsafe { (*ptr).val.get() as *const T }
         }
     }
 

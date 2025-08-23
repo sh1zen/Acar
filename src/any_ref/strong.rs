@@ -1,10 +1,10 @@
-use crate::any_ref::downcast::Downcast;
 use crate::any_ref::inner::{AnyRefInner, MAX_REFCOUNT};
 use crate::any_ref::ptr_interface::PtrInterface;
 use crate::any_ref::weak::WeakAnyRef;
 use crate::mutex::{WatchGuardMut, WatchGuardRef};
 use crate::utils::is_dangling;
 use std::any::{Any, TypeId};
+use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::process::abort;
 use std::sync::atomic;
@@ -49,7 +49,7 @@ impl AnyRef {
         if this
             .inner()
             .strong
-            .compare_exchange(1, 0, Relaxed, Relaxed)
+            .compare_exchange(1, 0, Acquire, Relaxed)
             .is_err()
         {
             this.inner().lock.unlock();
@@ -59,7 +59,8 @@ impl AnyRef {
         atomic::fence(Acquire);
 
         let this = ManuallyDrop::new(this);
-        let elem: T = unsafe { this.read_data::<T>() };
+        let this_data = unsafe { &**(*this.ptr).data.get() as *const _ };
+        let elem: T = unsafe { ptr::read(this_data as *const T) };
 
         // Make a weak pointer to clean up the implicit strong-weak reference
         let _weak = WeakAnyRef { ptr: this.ptr };
@@ -92,7 +93,7 @@ impl AnyRef {
         T: Any,
         F: FnOnce(WatchGuardRef<'_, T>) -> U,
     {
-        let ptr = self.downcast_ref::<T>();
+        let ptr = self.as_ref::<T>();
         AnyRef::new(func(ptr))
     }
 
@@ -102,10 +103,10 @@ impl AnyRef {
     /// ```
     /// use castbox::AnyRef;
     /// let a = AnyRef::new(50);
-    /// let ptr = a.as_cast_ptr::<i32>();
-    /// assert_eq!(unsafe { *ptr }, 50);
+    /// let ptr = unsafe { a.as_cast_ptr::<i32>() };
+    /// unsafe { assert_eq!(*ptr, 50); }
     /// ```
-    pub fn as_cast_ptr<T: Any>(&self) -> *const T {
+    pub unsafe fn as_cast_ptr<T: Any>(&self) -> *const T {
         if self.inner().type_id != TypeId::of::<T>() {
             panic!(
                 "AnyRef: wrong cast in as_ref::<{}>()",
@@ -114,47 +115,6 @@ impl AnyRef {
         }
         let ptr = self.as_ptr();
         ptr as *const T
-    }
-
-    /// Returns a reference to the inner value of type `T`.
-    /// Panics if the type does not match `T`.
-    ///
-    /// # Example
-    /// ```
-    /// use castbox::AnyRef;
-    /// let a = AnyRef::new(3.14f32);
-    /// let f = a.as_ref::<f32>();
-    /// assert_eq!(*f, 3.14);
-    /// ```
-    pub fn as_ref<T: Any>(&self) -> WatchGuardRef<'_, T> {
-        let ptr = self.as_cast_ptr::<T>();
-
-        let lock = self.inner().lock.clone();
-        lock.lock_group();
-
-        WatchGuardRef::new( unsafe { &*(ptr) }, lock)
-    }
-
-    /// Returns a mutable reference to the inner value of type `T`.
-    /// Panics if the type does not match `T`.
-    ///
-    /// # Example
-    /// ```
-    /// use castbox::AnyRef;
-    /// let mut a = AnyRef::new(3i32);
-    /// {
-    ///     let mut f = a.as_mut::<i32>();
-    ///     *f += 3i32;
-    /// }
-    /// assert_eq!(*a.as_ref::<i32>(), 6i32);
-    /// ```
-    pub fn as_mut<T: Any>(&mut self) -> WatchGuardMut<'_, T> {
-        let ptr = self.as_cast_ptr::<T>();
-
-        let lock = self.inner().lock.clone();
-        lock.lock();
-
-        WatchGuardMut::new(unsafe { &mut *(ptr as *mut T) }, lock)
     }
 
     /// Returns `true` if the `AnyRef` is the only strong reference to the value.
@@ -282,8 +242,11 @@ impl AnyRef {
         // prevent auto drop
         let this = ManuallyDrop::new(self);
 
+        let inner: *mut AnyRefInner = this.get_mut_inner_ptr();
+
         // Make sure Miri realizes that we transition from a noalias pointer to a raw pointer here.
-        let data_ptr = unsafe { &raw const (*this.ptr).data };
+        let cell_ptr: *const UnsafeCell<Box<dyn Any>> = unsafe { ptr::addr_of!((*inner).data) };
+        let data_ptr: *const Box<dyn Any> = cell_ptr.cast::<Box<dyn Any>>();
 
         data_ptr
     }
@@ -310,33 +273,56 @@ impl PtrInterface for AnyRef {
     }
 }
 
-impl Downcast for AnyRef {
-    fn try_downcast_ref<U: Any>(&self) -> Option<WatchGuardRef<'_, U>> {
-        let inner_ref: &AnyRefInner = self.inner();
-
-        if inner_ref.type_id == TypeId::of::<U>() {
-            let lock = inner_ref.lock.clone();
+impl AnyRef {
+    pub fn try_downcast_ref<U: Any>(&self) -> Option<WatchGuardRef<'_, U>> {
+        if self.inner().type_id == TypeId::of::<U>() {
+            let lock = self.inner().lock.clone();
             lock.lock_group();
 
-            let data = inner_ref.get_ref()?.downcast_ref::<U>()?;
-            Some(WatchGuardRef::new(data, lock))
+            let data = self.inner().get_ref();
+            let data = data.downcast_ref::<U>();
+
+            match data {
+                Some(t) => Some(WatchGuardRef::new(t, lock)),
+                None => {
+                    lock.unlock_group();
+                    None
+                }
+            }
         } else {
             None
         }
     }
 
-    fn try_downcast_mut<U: Any>(&mut self) -> Option<WatchGuardMut<'_, U>> {
-        let inner_ref: &AnyRefInner = self.inner();
-
-        if inner_ref.type_id == TypeId::of::<U>() {
-            let lock = inner_ref.lock.clone();
+    pub fn try_downcast_mut<U: Any>(&self) -> Option<WatchGuardMut<'_, U>> {
+        if self.inner().type_id == TypeId::of::<U>() {
+            let lock = self.inner().lock.clone();
             lock.lock();
 
-            let ptr = unsafe { &mut *(self.as_ptr() as *mut dyn Any) };
-            let ptr = ptr.downcast_mut::<U>()?;
-            Some(WatchGuardMut::new(ptr, lock))
+            let data = self.inner().get_mut_ref().downcast_mut::<U>();
+            match data {
+                Some(t) => Some(WatchGuardMut::new(t, lock)),
+                None => {
+                    lock.unlock();
+                    None
+                }
+            }
         } else {
             None
+        }
+    }
+
+    pub fn as_ref<U: Any>(&self) -> WatchGuardRef<'_, U> {
+        match self.try_downcast_ref::<U>() {
+            Some(data) => data,
+            None => panic!("Downcast failed"),
+        }
+    }
+
+    pub fn as_mut<U: Any>(&self) -> WatchGuardMut<'_, U> {
+        match self.try_downcast_mut::<U>() {
+            Some(data) => data,
+            None => panic!("Downcast mut failed"),
         }
     }
 }
@@ -387,7 +373,7 @@ impl AnyRef {
     ///
     /// # Example
     /// ```
-    /// use castbox::AnyRef;
+    /// use castbox::{AnyRef};
     /// let a = AnyRef::new(0);
     /// let a = AnyRef::fill(a, 123);
     /// assert_eq!(a.as_ref::<i32>(), 123);
@@ -395,7 +381,7 @@ impl AnyRef {
     pub fn fill<T: 'static>(mut this: Self, value: T) -> Self {
         let ref_inner = &mut *this.inner_mut();
         ref_inner.lock.lock();
-        ref_inner.data = Box::new(value);
+        ref_inner.data = UnsafeCell::new(Box::new(value));
         ref_inner.type_id = TypeId::of::<T>();
         ref_inner.lock.unlock();
         this
@@ -432,10 +418,10 @@ impl<T: 'static> From<*mut T> for AnyRef {
     /// # Example
     /// ```
     /// use castbox::utils::{create_raw_pointer, dealloc_layout};
-    /// use castbox::{AnyRef, Downcast};
+    /// use castbox::{AnyRef};
     /// let raw = create_raw_pointer(String::from("hello"));
-    /// let mut a = AnyRef::from(raw);
-    /// a.downcast_mut::<String>().push_str(":1");
+    /// let a = AnyRef::from(raw);
+    /// a.as_mut::<String>().push_str(":1");
     /// dealloc_layout(raw);
     /// assert_eq!(a.as_ref::<String>(), String::from("hello:1"));
     /// ```
@@ -494,6 +480,6 @@ impl fmt::Debug for AnyRef {
 
 impl fmt::Pointer for AnyRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Pointer::fmt(&self.inner().data, f)
+        fmt::Pointer::fmt(&self.inner().data.get(), f)
     }
 }

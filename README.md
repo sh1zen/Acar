@@ -1,5 +1,5 @@
 
-# 📦 castbox: A Runtime-Typed Reference-Counted Smart Pointer and concurrent programming tools.
+# 📦 A Runtime-Typed Reference-Counted Smart Pointer and concurrent programming tools.
 
 
 ---
@@ -48,7 +48,6 @@
 
 **AnyRef** is a custom smart pointer similar to `Arc`, designed for storing dynamically typed (`dyn Any`) values with strong and weak reference support, runtime downcasting, and optional thread-safe interior mutability.  
 It is ideal for scenarios where type erasure and runtime polymorphism are needed without exposing generic interfaces.
-
 
 - ✅ Runtime type storage via `dyn Any`
 - 🔁 Strong and weak reference counting
@@ -100,7 +99,7 @@ drop(h);
 {
     let b = b.clone();
     let t = thread::spawn(move || {
-        if let Some(v) = b.pop("c") {
+        if let Some(v) = b.pop() {
             assert_eq!(v, "hello");
         }
     });
@@ -113,7 +112,7 @@ assert!(b.pop().is_none());
 ### AnyRef
 
 ```rust
-use castbox::{AnyRef, Downcast, WeakAnyRef};
+use castbox::{AnyRef, WeakAnyRef};
 use std::thread;
 
 let mut handles = vec![];
@@ -129,7 +128,7 @@ let w = a_ref.downgrade();
 assert!(w.upgrade().is_some());
 
 for _ in 0..10 {
-    let mut a_ref = a_ref.clone();
+    let a_ref = a_ref.clone();
     handles.push(thread::spawn(move || {
         if let Some(mut s) = a_ref.try_downcast_mut::<String>() {
             s.push_str(":1")
@@ -204,7 +203,7 @@ Open your Cargo.toml and add:
 
 ```toml
 [dependencies]
-castbox = "0.0.7" # or the latest version available 
+castbox = "0.0.8" # or the latest version available 
 ```
 ---
 

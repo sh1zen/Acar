@@ -1,6 +1,6 @@
 mod tests_any_ref {
     use crate::mutex::WatchGuardRef;
-    use crate::{AnyRef, Downcast, WeakAnyRef};
+    use crate::{AnyRef, WeakAnyRef};
     use std::any::TypeId;
     use std::sync::Barrier;
     use std::sync::atomic::AtomicU8;
@@ -15,15 +15,21 @@ mod tests_any_ref {
             assert_eq!(*s, "hello");
         }
 
+        if let Some(mut s) = a.try_downcast_mut::<String>() {
+            *s = "hello:1".to_string();
+            drop(s);
+            assert_eq!(*a.as_ref::<String>(), "hello:1");
+        }
+
         let mut handles = vec![];
 
         let val = AnyRef::clone(&a);
 
         for _ in 0..100 {
-            let mut val_clone = val.clone();
+            let val_clone = val.clone();
 
             handles.push(thread::spawn(move || {
-                let rc = val_clone.downcast_mut::<String>();
+                let rc = val_clone.as_mut::<String>();
                 // add some dirty
                 let mut rc = std::hint::black_box(rc);
                 for _ in 0..100 {
@@ -36,7 +42,7 @@ mod tests_any_ref {
             let val_clone = val.clone();
             handles.push(thread::spawn(move || {
                 for _ in 0..100 {
-                    let _clone = val_clone.downcast_ref::<String>();
+                    let _clone = val_clone.as_ref::<String>();
                     let _ = std::hint::black_box(&_clone);
                 }
             }));
@@ -46,7 +52,7 @@ mod tests_any_ref {
             h.join().unwrap();
         }
 
-        assert_eq!(val.downcast_ref::<String>().split(":").count(), 10_001);
+        assert_eq!(val.as_ref::<String>().split(":").count(), 10_002);
     }
 
     #[test]
@@ -54,10 +60,11 @@ mod tests_any_ref {
         let x = AnyRef::new(5i32);
         assert_eq!(
             *x.map(|x: WatchGuardRef<'_, i32>| (*x * 2) as u64)
-                .downcast_ref::<u64>(),
+                .as_ref::<u64>(),
             10u64
         );
     }
+
     #[test]
     fn new_and_type() {
         let x = AnyRef::new(42u32);
@@ -99,13 +106,13 @@ mod tests_any_ref {
         let weak = x.downgrade();
 
         assert!(weak.upgrade().is_some());
-        assert!(weak.upgrade().unwrap().downcast_ref::<&str>().eq(&"test"));
+        assert!(weak.upgrade().unwrap().as_ref::<&str>().eq(&"test"));
     }
 
     #[test]
     fn test_downcast_success() {
         let x = AnyRef::new(1234i64);
-        let val = x.downcast_ref::<i64>();
+        let val = x.as_ref::<i64>();
         assert_eq!(*val, 1234);
     }
 
@@ -118,7 +125,7 @@ mod tests_any_ref {
 
     #[test]
     fn test_try_downcast_mut_success() {
-        let mut x = AnyRef::new(42);
+        let x = AnyRef::new(42);
         let clone = x.clone().downgrade();
         let y = x.try_downcast_mut::<i32>();
         assert!(y.is_some());
@@ -127,7 +134,7 @@ mod tests_any_ref {
             assert_eq!(*x, 43);
         };
 
-        assert_eq!(*clone.downcast_ref::<i32>(), 43);
+        assert_eq!(clone.upgrade().unwrap().as_ref::<i32>(), 43);
     }
 
     #[test]
@@ -151,7 +158,7 @@ mod tests_any_ref {
     fn test_default_fill() {
         let x: AnyRef = Default::default();
         let x = AnyRef::fill(x, 10i32);
-        assert_eq!(x.downcast_ref::<i32>().clone(), 10i32);
+        assert_eq!(x.as_ref::<i32>().clone(), 10i32);
 
         struct Def {
             data: String,
@@ -166,7 +173,7 @@ mod tests_any_ref {
         }
 
         let x = AnyRef::default_with::<Def>();
-        assert_eq!(x.downcast_ref::<Def>().data, String::from("hello"));
+        assert_eq!(x.as_ref::<Def>().data, String::from("hello"));
     }
 
     #[test]
@@ -175,7 +182,7 @@ mod tests_any_ref {
         let raw = AnyRef::into_raw(x);
 
         let y = unsafe { AnyRef::from_raw(raw) };
-        let val = y.downcast_ref::<String>();
+        let val = y.as_ref::<String>();
         assert_eq!(val, "hello");
     }
 
@@ -213,8 +220,8 @@ mod tests_any_ref {
             let x_clone = x.clone();
             let barrier_clone = barrier.clone();
             handles.push(thread::spawn(move || {
-                barrier_clone.downcast_ref::<Barrier>().wait();
-                let val = x_clone.downcast_ref::<i32>();
+                barrier_clone.as_ref::<Barrier>().wait();
+                let val = x_clone.as_ref::<i32>();
                 assert_eq!(*val, 100);
             }));
 
@@ -240,7 +247,7 @@ mod tests_any_ref {
             handles.push(thread::spawn(move || {
                 let upgraded = weak_clone.upgrade();
                 if let Some(v) = upgraded {
-                    assert_eq!(v.downcast_ref::<&str>(), "abc");
+                    assert_eq!(v.as_ref::<&str>(), "abc");
                 }
             }));
         }
@@ -254,8 +261,8 @@ mod tests_any_ref {
 
     #[test]
     fn test_thread_safe() {
-        let mut x = AnyRef::new(String::from("hello"));
-        let mut y = x.clone();
+        let x = AnyRef::new(String::from("hello"));
+        let y = x.clone();
 
         if let Some(mut v) = x.try_downcast_mut::<String>() {
             v.push_str(":1");
@@ -265,15 +272,15 @@ mod tests_any_ref {
             v.push_str(":2");
         }
 
-        assert_eq!(*y.downcast_ref::<String>(), "hello:1:2");
+        assert_eq!(*y.as_ref::<String>(), "hello:1:2");
 
         let weak = x.downgrade();
         let mut handles = vec![];
 
         for i in 0..10 {
-            let mut a_clone = AnyRef::clone(&x);
+            let a_clone = AnyRef::clone(&x);
             handles.push(thread::spawn(move || {
-                let mut val = a_clone.downcast_mut::<String>();
+                let mut val = a_clone.as_mut::<String>();
                 val.push_str(format!(":{}", i).as_str());
             }));
         }
@@ -285,7 +292,7 @@ mod tests_any_ref {
         assert_eq!(
             weak.upgrade()
                 .unwrap()
-                .downcast_ref::<String>()
+                .as_ref::<String>()
                 .split(":")
                 .count(),
             13
@@ -302,7 +309,7 @@ mod tests_any_ref {
             let x2 = x.clone();
 
             thread::spawn(move || {
-                let val = x2.downcast_ref::<&str>();
+                let val = x2.as_ref::<&str>();
                 assert_eq!(*val, "persistent");
                 // Drop happens when thread ends
             })
@@ -315,17 +322,15 @@ mod tests_any_ref {
 
     #[test]
     fn test_try_unwrap() {
-        let x = AnyRef::new(3i32);
+        let x = AnyRef::new(314i32);
         if let Ok(t) = AnyRef::try_unwrap::<i32>(x) {
-            assert_eq!(t, 3i32);
+            assert_eq!(t, 314i32);
         }
 
         let x = AnyRef::new(4);
         let _y = AnyRef::clone(&x);
         assert_eq!(
-            *AnyRef::try_unwrap::<i32>(x)
-                .unwrap_err()
-                .downcast_ref::<i32>(),
+            *AnyRef::try_unwrap::<i32>(x).unwrap_err().as_ref::<i32>(),
             4
         );
     }

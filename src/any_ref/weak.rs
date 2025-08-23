@@ -1,11 +1,8 @@
-use crate::any_ref::downcast::Downcast;
 use crate::any_ref::inner::{AnyRefInner, MAX_REFCOUNT};
 use crate::any_ref::ptr_interface::PtrInterface;
 use crate::any_ref::strong::AnyRef;
-use crate::mutex::{WatchGuardMut, WatchGuardRef};
 use crate::utils::is_dangling;
 use std::alloc::{Layout, dealloc};
-use std::any::{Any, TypeId};
 use std::num::NonZeroUsize;
 use std::process::abort;
 use std::ptr;
@@ -159,26 +156,6 @@ impl Default for WeakAnyRef {
     }
 }
 
-impl Downcast for WeakAnyRef {
-    fn try_downcast_ref<U: Any>(&self) -> Option<WatchGuardRef<'_, U>> {
-        let inner_ref: &AnyRefInner = self.inner()?;
-
-        if inner_ref.type_id == TypeId::of::<U>() {
-            let lock = inner_ref.lock.clone();
-            lock.lock_group();
-
-            let data = inner_ref.get_ref()?.downcast_ref::<U>()?;
-            Some(WatchGuardRef::new(data, lock))
-        } else {
-            None
-        }
-    }
-
-    fn try_downcast_mut<U: Any>(&mut self) -> Option<WatchGuardMut<'_, U>> {
-        None
-    }
-}
-
 impl PtrInterface for WeakAnyRef {
     #[inline]
     fn get_mut_inner_ptr(&self) -> *mut AnyRefInner {
@@ -206,7 +183,6 @@ impl Drop for WeakAnyRef {
             let ptr = self.ptr as *mut u8;
 
             unsafe {
-                //drop(Box::from_raw(self.ptr.as_ptr()));
                 dealloc(ptr, layout);
             }
         }

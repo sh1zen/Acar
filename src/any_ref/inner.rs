@@ -1,14 +1,15 @@
 use crate::mutex::Mutex;
 use std::any::{Any, TypeId};
+use std::cell::UnsafeCell;
+use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::Acquire;
 
 /// Max number of reference that an any_ref could have
 pub(super) const MAX_REFCOUNT: usize = isize::MAX as usize;
 
 /// Actually the main worker of AnyRef
 pub(crate) struct AnyRefInner {
-    pub(crate) data: Box<dyn Any>,
+    pub(crate) data: UnsafeCell<Box<dyn Any>>,
     pub(crate) type_id: TypeId,
     pub(crate) type_name: &'static str,
     pub(crate) lock: Mutex,
@@ -31,7 +32,7 @@ impl AnyRefInner {
         T: Any + Sized,
     {
         Self {
-            data: src as Box<dyn Any>,
+            data: UnsafeCell::new(src as Box<dyn Any>),
             type_id: TypeId::of::<T>(),
             type_name: std::any::type_name::<T>(),
             lock: Mutex::new(),
@@ -41,24 +42,19 @@ impl AnyRefInner {
     }
 
     #[inline(always)]
-    fn is_valid(&self) -> bool {
-        self.strong.load(Acquire) > 0
+    fn internal_get(&self) -> *mut dyn Any {
+        let ptr = self.data.get();
+        let data = unsafe { &mut **ptr as *mut dyn Any };
+        data
     }
 
-    pub(crate) fn get_ref(&self) -> Option<&dyn Any> {
-        if self.is_valid() {
-            Some(&*self.data)
-        } else {
-            None
-        }
+    pub(crate) fn get_ref(&self) -> &dyn Any {
+        unsafe { &*self.internal_get() }
     }
 
-    pub(crate) fn get_mut_ref(&mut self) -> Option<&mut dyn Any> {
-        if self.is_valid() {
-            Some(&mut *self.data)
-        } else {
-            None
-        }
+    pub(crate) fn get_mut_ref(&self) -> &mut dyn Any {
+        let mut value = unsafe { NonNull::new_unchecked(self.internal_get()) };
+        unsafe { &mut *value.as_mut() }
     }
 }
 

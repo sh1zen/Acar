@@ -32,7 +32,7 @@ where
             // SAFETY: if is_dangling returns false, then the pointer is dereferenceable.
             // The payload may be dropped at this point, and we have to maintain provenance,
             // so use raw pointer manipulation.
-            unsafe { &raw mut *(*ptr).data }
+            unsafe { &mut **(*ptr).data.get() as *const dyn Any }
         }
     }
 

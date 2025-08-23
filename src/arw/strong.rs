@@ -1,9 +1,10 @@
+use crate::arw::WeakArw;
 use crate::arw::inner::{ArwInner, MAX_REFCOUNT};
 use crate::arw::ptr_interface::PtrInterface;
-use crate::arw::WeakArw;
 use crate::mutex::{WatchGuardMut, WatchGuardRef};
 use crate::utils::is_dangling;
 use std::any::Any;
+use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
 use std::process::abort;
 use std::sync::atomic;
@@ -69,14 +70,14 @@ impl<T> Arw<T> {
         Ok(elem)
     }
 
-    pub(crate) fn inner(&self) -> &ArwInner<T> {
+    fn inner(&self) -> &ArwInner<T> {
         // This unsafety is ok because while this Arw is alive we're guaranteed
         // that the inner pointer is valid.
         let ptr: *const ArwInner<T> = self.ptr;
         unsafe { &*ptr }
     }
 
-    fn inner_mut(&mut self) -> &mut ArwInner<T> {
+    fn inner_mut(&self) -> &mut ArwInner<T> {
         let ptr: *mut ArwInner<T> = self.get_mut_inner_ptr();
         unsafe { &mut *ptr }
     }
@@ -108,7 +109,7 @@ impl<T> Arw<T> {
         let lock = self.inner().lock.clone();
         lock.lock_group();
 
-        WatchGuardRef::new(self.inner().get_ref().unwrap(), lock)
+        WatchGuardRef::new(self.inner().get_ref(), lock)
     }
 
     /// Returns a mutable reference to the inner value of type `T`.
@@ -117,18 +118,18 @@ impl<T> Arw<T> {
     /// # Example
     /// ```
     /// use castbox::Arw;
-    /// let mut a = Arw::new(3i32);
+    /// let a = Arw::new(3i32);
     /// {
     ///     let mut f = a.as_mut();
     ///     *f += 3i32;
     /// }
     /// assert_eq!(*a.as_ref(), 6i32);
     /// ```
-    pub fn as_mut(&mut self) -> WatchGuardMut<'_, T> {
+    pub fn as_mut(&self) -> WatchGuardMut<'_, T> {
         let lock = self.inner().lock.clone();
         lock.lock();
 
-        WatchGuardMut::new(self.inner_mut().get_mut_ref().unwrap(), lock)
+        WatchGuardMut::new(self.inner().get_mut_ref(), lock)
     }
 
     /// Returns `true` if the `Arw` is the only strong reference to the value.
@@ -256,8 +257,11 @@ impl<T> Arw<T> {
         // prevent auto drop
         let this = ManuallyDrop::new(self);
 
+        let inner: *mut ArwInner<T> = this.get_mut_inner_ptr();
+
         // Make sure Miri realizes that we transition from a noalias pointer to a raw pointer here.
-        let data_ptr = unsafe { &raw const (*this.ptr).val };
+        let cell_ptr: *const UnsafeCell<T> = unsafe { ptr::addr_of!((*inner).val) };
+        let data_ptr: *const T = cell_ptr.cast::<T>();
 
         data_ptr
     }
@@ -319,10 +323,10 @@ impl<T: Sized> Arw<T> {
     /// let a = Arw::fill(a, 123);
     /// assert_eq!(a.as_ref(), 123);
     /// ```
-    pub fn fill(mut this: Self, value: T) -> Self {
+    pub fn fill(this: Self, value: T) -> Self {
         let ref_inner = &mut *this.inner_mut();
         ref_inner.lock.lock();
-        ref_inner.val = value;
+        ref_inner.val = UnsafeCell::new(value);
         ref_inner.lock.unlock();
         this
     }
@@ -363,7 +367,7 @@ impl<T: Sized + 'static> From<*mut T> for Arw<T> {
     /// use castbox::utils::{create_raw_pointer, dealloc_layout};
     /// use castbox::Arw;
     /// let raw = create_raw_pointer(String::from("hello"));
-    /// let mut a = Arw::from(raw);
+    /// let a = Arw::from(raw);
     /// a.as_mut().push_str(":1");
     /// dealloc_layout(raw);
     /// assert_eq!(a.as_ref(), "hello:1");
@@ -423,6 +427,6 @@ impl<T> fmt::Debug for Arw<T> {
 
 impl<T> fmt::Pointer for Arw<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Pointer::fmt(&self.inner(), f)
+        fmt::Pointer::fmt(&self.inner().val.get(), f)
     }
 }
