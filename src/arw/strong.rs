@@ -1,11 +1,12 @@
-use crate::arw::WeakArw;
 use crate::arw::inner::{ArwInner, MAX_REFCOUNT};
 use crate::arw::ptr_interface::PtrInterface;
+use crate::arw::WeakArw;
 use crate::mutex::{WatchGuardMut, WatchGuardRef};
 use crate::utils::is_dangling;
 use std::any::Any;
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
+use std::panic::UnwindSafe;
 use std::process::abort;
 use std::sync::atomic;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
@@ -18,6 +19,8 @@ pub struct Arw<T: Sized> {
 
 unsafe impl<T: Sized + Sync + Send> Send for Arw<T> {}
 unsafe impl<T: Sized + Sync + Send> Sync for Arw<T> {}
+
+impl <T: Sized> UnwindSafe for Arw<T> {}
 
 impl<T> Arw<T> {
     /// Creates a new `Arw` containing the given value.
@@ -103,7 +106,7 @@ impl<T> Arw<T> {
     /// use castbox::Arw;
     /// let a = Arw::new(3.14f32);
     /// let f = a.as_ref();
-    /// assert_eq!(*f, 3.14);
+    /// assert_eq!(*f, 3.14f32);
     /// ```
     pub fn as_ref(&self) -> WatchGuardRef<'_, T> {
         let lock = self.inner().lock.clone();

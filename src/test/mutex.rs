@@ -1,4 +1,4 @@
-mod test_mutex {
+mod tests_mutex {
     use crate::mutex::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};
@@ -31,6 +31,7 @@ mod test_mutex {
         }
 
         assert!(mutex.is_locked_group());
+        drop(mutex);
     }
 
     #[test]
@@ -255,7 +256,7 @@ mod test_mutex {
     }
 
     #[test]
-    fn stress_mixed() {
+    fn stress_multi_lock() {
         let m = Mutex::new();
         let excl_sum = Arc::new(AtomicI32::new(0));
         let group_entries = Arc::new(AtomicUsize::new(0));
