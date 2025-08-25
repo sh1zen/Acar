@@ -5,6 +5,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
 use std::thread::Thread;
 use std::{fmt, hint, thread};
+use std::sync::atomic;
 
 enum MutexType {
     Exclusive,
@@ -145,7 +146,7 @@ impl Mutex {
         // we add it here so that as soon as the lock is available we can proceed to execute
         // all the multi lock group.
         // SAFETY: The unlock will fetch_sub only when the internal state is on LOCKED_GROUP state
-        inner.locked.fetch_add(1, Acquire);
+        inner.locked.fetch_add(1, Release);
 
         loop {
             // Spin first to speed things up if the lock is released quickly.
@@ -161,8 +162,11 @@ impl Mutex {
                     }
                 }
                 LOCKED_GROUP => {
-                    // if some thread are parked let's wake them up
-                    self.wake(MutexType::Group);
+                    // fix data race
+                    if inner.state.load(Acquire) == LOCKED_GROUP {
+                        // if some thread are parked let's wake them up
+                        self.wake(MutexType::Group);
+                    }
                     break;
                 }
                 _ => {
@@ -310,6 +314,8 @@ impl Mutex {
 
         if let Some(thread) = parking.pop() {
             thread.unpark();
+            // pre-release to improve performances
+            self.inner().wake_deadlock.store(UNLOCKED, Release);
             while let Some(thread) = parking.pop() {
                 thread.unpark();
             }
@@ -351,7 +357,9 @@ impl Clone for Mutex {
 
 impl Drop for Mutex {
     fn drop(&mut self) {
-        if self.inner().ref_count.fetch_sub(1, Relaxed) == 1 {
+        if self.inner().ref_count.fetch_sub(1, Release) == 1 {
+            atomic::fence(Acquire);
+
             let ptr = self.ptr as *mut InnerMutex;
             unsafe { drop(Box::from_raw(ptr)) };
         }
