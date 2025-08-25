@@ -178,14 +178,14 @@ mutex.unlock_group();
 mutex.unlock_group();
 
 let h1 = thread::spawn(move || {
-    m1.lock();
+    m1.lock_exclusive();
     sleep(Duration::from_millis(100));
-    m1.unlock();
+    m1.unlock_exclusive();
 });
 
 let h2 = thread::spawn(move || {
-    m2.lock();
-    m2.unlock();
+    m2.lock_exclusive();
+    m2.unlock_exclusive();
 });
 
 h1.join().unwrap();

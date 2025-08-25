@@ -13,7 +13,7 @@ mod tests_mutex {
 
         let mutex = Mutex::new();
 
-        mutex.lock();
+        mutex.lock_exclusive();
 
         for _i in 0..100 {
             let m1 = mutex.clone();
@@ -24,7 +24,7 @@ mod tests_mutex {
 
         assert!(!mutex.is_locked_group());
 
-        mutex.unlock();
+        mutex.unlock_exclusive();
 
         for h in handles {
             h.join().unwrap();
@@ -50,23 +50,24 @@ mod tests_mutex {
         mutex.lock_group();
 
         mutex.unlock_group();
-        mutex.unlock_group();
 
         let h1 = thread::spawn(move || {
-            m1.lock();
+            m1.lock_exclusive();
             sleep(Duration::from_millis(100));
-            m1.unlock();
+            m1.unlock_exclusive();
         });
 
         let h2 = thread::spawn(move || {
-            m2.lock();
-            m2.unlock();
+            m2.lock_exclusive();
+            m2.unlock_exclusive();
         });
+
+        mutex.unlock_group();
 
         h1.join().unwrap();
         h2.join().unwrap();
 
-        drop(mutex);
+        //drop(mutex);
     }
 
     #[test]
@@ -84,13 +85,13 @@ mod tests_mutex {
     #[test]
     fn is_locked_reflects_state() {
         let m = Mutex::new();
-        assert!(!m.is_locked());
+        assert!(!m.is_locked_exclusive());
         {
-            let _g = m.lock();
-            assert!(m.is_locked());
-            m.unlock();
+            let _g = m.lock_exclusive();
+            assert!(m.is_locked_exclusive());
+            m.unlock_exclusive();
         }
-        assert!(!m.is_locked());
+        assert!(!m.is_locked_exclusive());
     }
 
     #[test]
@@ -100,7 +101,7 @@ mod tests_mutex {
         let entered_group = Arc::new(AtomicBool::new(false));
         let entered_excl = Arc::new(AtomicBool::new(false));
 
-        m.lock();
+        m.lock_exclusive();
         let eg = entered_group.clone();
         let mg = m.clone();
         let tg = thread::spawn(move || {
@@ -112,16 +113,16 @@ mod tests_mutex {
         let ee = entered_excl.clone();
         let me = m.clone();
         let te = thread::spawn(move || {
-            me.lock();
+            me.lock_exclusive();
             ee.store(true, Ordering::Release);
-            me.unlock();
+            me.unlock_exclusive();
         });
 
         thread::sleep(Duration::from_millis(50));
         assert!(!entered_group.load(Ordering::Acquire));
         assert!(!entered_excl.load(Ordering::Acquire));
 
-        m.unlock();
+        m.unlock_exclusive();
 
         tg.join().unwrap();
         te.join().unwrap();
@@ -159,7 +160,7 @@ mod tests_mutex {
         }
         m.unlock_all_group();
         assert!(max_concurrent.load(Ordering::Acquire) > 1);
-        assert!(!m.is_locked());
+        assert!(!m.is_locked_exclusive());
     }
 
     #[test]
@@ -175,13 +176,13 @@ mod tests_mutex {
             let ok = ok.clone();
             ths.push(thread::spawn(move || {
                 for _ in 0..50 {
-                    mm.lock();
+                    mm.lock_exclusive();
                     if inside.swap(true, Ordering::AcqRel) {
                         ok.store(false, Ordering::Release);
                     }
                     thread::sleep(Duration::from_millis(1));
                     inside.store(false, Ordering::Release);
-                    mm.unlock();
+                    mm.unlock_exclusive();
                 }
             }));
         }
@@ -216,9 +217,9 @@ mod tests_mutex {
         let ee = entered_excl.clone();
         let me = m.clone();
         let te = thread::spawn(move || {
-            me.lock();
+            me.lock_exclusive();
             ee.store(true, Ordering::Release);
-            me.unlock();
+            me.unlock_exclusive();
         });
 
         te.join().unwrap();
@@ -233,7 +234,7 @@ mod tests_mutex {
     #[should_panic(expected = "Trying to unlock a non Locked Group")]
     fn unlock_group_panics_if_not_group() {
         let m = Mutex::new();
-        m.lock();
+        m.lock_exclusive();
         m.unlock_group();
     }
 
@@ -241,7 +242,7 @@ mod tests_mutex {
     #[should_panic(expected = "Is not Locked or is a Locked Group")]
     fn unlock_panics_if_not_locked() {
         let m = Mutex::new();
-        m.unlock();
+        m.unlock_exclusive();
     }
 
     #[test]
@@ -249,7 +250,7 @@ mod tests_mutex {
         let m = Mutex::new();
         m.lock_group();
         let res = std::panic::catch_unwind(|| {
-            m.unlock();
+            m.unlock_exclusive();
         });
         assert!(res.is_err());
         m.unlock_group();
@@ -269,9 +270,9 @@ mod tests_mutex {
             ths.push(thread::spawn(move || {
                 for i in 0..100 {
                     if (id + i) % 3 == 0 {
-                        mm.lock();
+                        mm.lock_exclusive();
                         excl.fetch_add(1, Ordering::Relaxed);
-                        mm.unlock();
+                        mm.unlock_exclusive();
                     } else {
                         mm.lock_group();
                         ge.fetch_add(1, Ordering::Relaxed);

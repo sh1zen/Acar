@@ -48,14 +48,14 @@ impl<T> Arw<T> {
     /// assert_eq!(value, 123i32);
     /// ```
     pub fn try_unwrap(this: Self) -> Result<T, Self> {
-        this.inner().lock.lock();
+        this.inner().lock.lock_exclusive();
         if this
             .inner()
             .strong
             .compare_exchange(1, 0, Relaxed, Relaxed)
             .is_err()
         {
-            this.inner().lock.unlock();
+            this.inner().lock.unlock_exclusive();
             return Err(this);
         }
 
@@ -86,7 +86,7 @@ impl<T> Arw<T> {
     }
 
     pub fn is_locked(&self) -> bool {
-        self.inner().lock.is_locked()
+        self.inner().lock.is_locked_exclusive()
     }
 
     #[inline]
@@ -130,7 +130,7 @@ impl<T> Arw<T> {
     /// ```
     pub fn as_mut(&self) -> WatchGuardMut<'_, T> {
         let lock = self.inner().lock.clone();
-        lock.lock();
+        lock.lock_exclusive();
 
         WatchGuardMut::new(self.inner().get_mut_ref(), lock)
     }
@@ -328,9 +328,9 @@ impl<T: Sized> Arw<T> {
     /// ```
     pub fn fill(this: Self, value: T) -> Self {
         let ref_inner = &mut *this.inner_mut();
-        ref_inner.lock.lock();
+        ref_inner.lock.lock_exclusive();
         ref_inner.val = UnsafeCell::new(value);
-        ref_inner.lock.unlock();
+        ref_inner.lock.unlock_exclusive();
         this
     }
 }
@@ -423,7 +423,7 @@ impl<T> fmt::Debug for Arw<T> {
         f.debug_struct("Arw")
             .field("S", &inner.strong)
             .field("W", &inner.weak)
-            .field("locked", &inner.lock.is_locked())
+            .field("locked", &inner.lock.is_locked_exclusive())
             .finish()
     }
 }

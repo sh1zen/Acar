@@ -45,14 +45,14 @@ impl AnyRef {
     /// assert_eq!(value, 123i32);
     /// ```
     pub fn try_unwrap<T>(this: Self) -> Result<T, Self> {
-        this.inner().lock.lock();
+        this.inner().lock.lock_exclusive();
         if this
             .inner()
             .strong
             .compare_exchange(1, 0, Acquire, Relaxed)
             .is_err()
         {
-            this.inner().lock.unlock();
+            this.inner().lock.unlock_exclusive();
             return Err(this);
         }
 
@@ -84,7 +84,7 @@ impl AnyRef {
     }
 
     pub fn is_locked(&self) -> bool {
-        self.inner().lock.is_locked()
+        self.inner().lock.is_locked_exclusive()
     }
 
     #[inline]
@@ -297,13 +297,13 @@ impl AnyRef {
     pub fn try_downcast_mut<U: Any>(&self) -> Option<WatchGuardMut<'_, U>> {
         if self.inner().type_id == TypeId::of::<U>() {
             let lock = self.inner().lock.clone();
-            lock.lock();
+            lock.lock_exclusive();
 
             let data = self.inner().get_mut_ref().downcast_mut::<U>();
             match data {
                 Some(t) => Some(WatchGuardMut::new(t, lock)),
                 None => {
-                    lock.unlock();
+                    lock.unlock_exclusive();
                     None
                 }
             }
@@ -380,10 +380,10 @@ impl AnyRef {
     /// ```
     pub fn fill<T: 'static>(mut this: Self, value: T) -> Self {
         let ref_inner = &mut *this.inner_mut();
-        ref_inner.lock.lock();
+        ref_inner.lock.lock_exclusive();
         ref_inner.data = UnsafeCell::new(Box::new(value));
         ref_inner.type_id = TypeId::of::<T>();
-        ref_inner.lock.unlock();
+        ref_inner.lock.unlock_exclusive();
         this
     }
 }
