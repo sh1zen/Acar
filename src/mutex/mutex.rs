@@ -1,11 +1,11 @@
 use crate::collections::AtomicVec;
 use crate::mutex::Backoff;
 use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::sync::atomic;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::sync::atomic::{AtomicU8, AtomicUsize};
 use std::thread::Thread;
 use std::{fmt, hint, thread};
-use std::sync::atomic;
 
 enum MutexType {
     Exclusive,

@@ -6,7 +6,7 @@ use crate::utils::is_dangling;
 use std::any::Any;
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
-use std::panic::UnwindSafe;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::process::abort;
 use std::sync::atomic;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
@@ -20,8 +20,8 @@ pub struct Arw<T: Sized> {
 unsafe impl<T: Sized + Sync + Send> Send for Arw<T> {}
 unsafe impl<T: Sized + Sync + Send> Sync for Arw<T> {}
 
-impl <T: Sized> UnwindSafe for Arw<T> {}
-
+impl<T: Sized> UnwindSafe for Arw<T> {}
+impl<T: Sized> RefUnwindSafe for Arw<T> {}
 impl<T> Arw<T> {
     /// Creates a new `Arw` containing the given value.
     ///

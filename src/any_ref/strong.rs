@@ -6,6 +6,7 @@ use crate::utils::is_dangling;
 use std::any::{Any, TypeId};
 use std::cell::UnsafeCell;
 use std::mem::ManuallyDrop;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::process::abort;
 use std::sync::atomic;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
@@ -18,6 +19,9 @@ pub struct AnyRef {
 
 unsafe impl Send for AnyRef {}
 unsafe impl Sync for AnyRef {}
+
+impl UnwindSafe for AnyRef {}
+impl RefUnwindSafe for AnyRef {}
 
 impl AnyRef {
     /// Creates a new `AnyRef` containing the given value.
