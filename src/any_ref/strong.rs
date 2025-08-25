@@ -397,7 +397,7 @@ impl Drop for AnyRef {
             return;
         }
 
-        atomic::fence(Release);
+        atomic::fence(Acquire);
 
         let _weak = WeakAnyRef { ptr: self.ptr };
 

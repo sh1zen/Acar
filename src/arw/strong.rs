@@ -52,7 +52,7 @@ impl<T> Arw<T> {
         if this
             .inner()
             .strong
-            .compare_exchange(1, 0, Relaxed, Relaxed)
+            .compare_exchange(1, 0, Acquire, Relaxed)
             .is_err()
         {
             this.inner().lock.unlock_exclusive();
@@ -297,7 +297,7 @@ impl<T> Clone for Arw<T> {
         // Using a relaxed ordering is alright here, as knowledge of the
         // original reference prevents other threads from erroneously deleting
         // the object.
-        if self.inner().strong.fetch_add(1, Relaxed) > MAX_REFCOUNT {
+        if self.inner().strong.fetch_add(1, Relaxed) >= MAX_REFCOUNT {
             abort();
         }
 
@@ -347,7 +347,7 @@ where
             return;
         }
 
-        atomic::fence(Release);
+        atomic::fence(Acquire);
 
         let _weak = WeakArw { ptr: self.ptr };
 

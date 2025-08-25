@@ -280,7 +280,7 @@ impl<K: Eq + Hash, V> AtomicHashMap<K, V> {
 impl<K, V> Clone for AtomicHashMap<K, V> {
     fn clone(&self) -> Self {
         let inner = unsafe { &*self.ptr };
-        inner.ref_count.fetch_add(1, Ordering::Acquire);
+        inner.ref_count.fetch_add(1, Ordering::Relaxed);
         Self { ptr: self.ptr }
     }
 }
@@ -289,7 +289,7 @@ impl<K, V> Drop for AtomicHashMap<K, V> {
     fn drop(&mut self) {
         let inner = unsafe { &*self.ptr };
         if inner.ref_count.fetch_sub(1, Ordering::Release) == 1 {
-            atomic::fence(Ordering::Release);
+            atomic::fence(Ordering::Acquire);
 
             for bucket in &inner.buckets {
                 let mut cur = bucket.head.load(Ordering::Acquire);
